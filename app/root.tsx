@@ -36,6 +36,10 @@ export default function App() {
         {shopifyFontLinks}
         <Meta />
         <Links />
+        <script
+          src="https://cdn.shopify.com/shopifycloud/app-bridge.js"
+          async
+        ></script>
       </head>
       <body>
         <AppProvider i18n={translations}>

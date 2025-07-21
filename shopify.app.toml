@@ -3,7 +3,7 @@
 client_id = "eb3e85d01989aa2d6f08378b8df5a312"
 name = "low-stock-alert-app"
 handle = "low-stock-alert-app-1"
-application_url = "https://baseball-craft-massage-loans.trycloudflare.com"
+application_url = "https://salon-presence-wi-belle.trycloudflare.com"
 embedded = true
 
 [build]
@@ -23,10 +23,10 @@ api_version = "2025-07"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_products"
+scopes = "write_products,read_orders"
 
 [auth]
-redirect_urls = ["https://baseball-craft-massage-loans.trycloudflare.com/auth/callback", "https://baseball-craft-massage-loans.trycloudflare.com/auth/shopify/callback", "https://baseball-craft-massage-loans.trycloudflare.com/api/auth/callback"]
+redirect_urls = ["https://salon-presence-wi-belle.trycloudflare.com/auth/callback", "https://salon-presence-wi-belle.trycloudflare.com/auth/shopify/callback", "https://salon-presence-wi-belle.trycloudflare.com/api/auth/callback"]
 
 [pos]
 embedded = false
