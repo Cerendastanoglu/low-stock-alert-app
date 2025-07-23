@@ -21,10 +21,11 @@ const shopifyFontLinks = [
   />,
 ];
 
-export const meta: MetaFunction = () => [{ title: "Low Inventory App" }];
+export const meta: MetaFunction = () => [{ title: "Inventory Management Suite" }];
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: polarisStyles },
+  { rel: "preload", href: "/app/styles/targeted-enhancements.css", as: "style" },
 ];
 
 export default function App() {
@@ -36,6 +37,33 @@ export default function App() {
         {shopifyFontLinks}
         <Meta />
         <Links />
+        <style dangerouslySetInnerHTML={{
+          __html: `
+            /* Critical CSS to prevent FOUC */
+            body { 
+              margin: 0; 
+              font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+              background: #f8fafc;
+            }
+            
+            /* Loading spinner */
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+            
+            /* Prevent layout shift */
+            .Polaris-Layout { min-height: 100vh; }
+            .Polaris-Page { background: transparent; }
+            
+            /* Image loading optimization */
+            img { 
+              opacity: 0; 
+              transition: opacity 0.3s ease-in-out; 
+            }
+            img.loaded { opacity: 1; }
+          `
+        }} />
         <script
           src="https://cdn.shopify.com/shopifycloud/app-bridge.js"
           async

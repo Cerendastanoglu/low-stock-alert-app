@@ -30,3 +30,28 @@ model Session {
   collaborator  Boolean?  @default(false)
   emailVerified Boolean?  @default(false)
 }
+
+model InventoryHistory {
+  id            String   @id @default(cuid())
+  shop          String
+  productId     String
+  productTitle  String
+  variantId     String?
+  variantTitle  String?
+  changeType    String
+  previousStock Int
+  newStock      Int
+  quantity      Int
+  userId        String?
+  userName      String?
+  userEmail     String?
+  orderId       String?
+  orderNumber   String?
+  notes         String?
+  source        String
+  timestamp     DateTime @default(now())
+  
+  @@index([shop, productId])
+  @@index([shop, timestamp])
+  @@index([changeType])
+}

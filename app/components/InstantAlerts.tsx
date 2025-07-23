@@ -9,21 +9,33 @@ import {
   Card,
   Badge,
   Icon,
-  Toast,
-  Frame,
 } from "@shopify/polaris";
 import {
   AlertTriangleIcon,
-  CheckCircleIcon,
-  XSmallIcon,
   RefreshIcon,
+  XSmallIcon,
 } from "@shopify/polaris-icons";
+
+interface Product {
+  id: string;
+  name: string;
+  stock: number;
+  salesVelocity?: {
+    daily: number;
+    weekly: number;
+    monthly: number;
+  };
+  forecast?: {
+    daysUntilStockout: number | null;
+    status: 'critical' | 'warning' | 'safe' | 'unknown';
+  };
+}
 
 interface AlertProduct {
   id: string;
   name: string;
   stock: number;
-  status: 'critical' | 'warning' | 'out-of-stock';
+  status: 'out-of-stock' | 'critical' | 'warning';
   daysUntilStockout?: number;
 }
 
@@ -40,55 +52,52 @@ interface InstantAlert {
 
 export function InstantAlerts() {
   const [alerts, setAlerts] = useState<InstantAlert[]>([]);
-  const [toastActive, setToastActive] = useState(false);
-  const [toastMessage, setToastMessage] = useState("");
   const [lastCheck, setLastCheck] = useState<Date>(new Date());
+  const [isMinimized, setIsMinimized] = useState(false);
   
   const fetcher = useFetcher();
 
   // Check for inventory alerts
   const checkInventoryAlerts = () => {
-    // In a real implementation, this would fetch current inventory data
-    // For now, we'll simulate some alerts
     const criticalThreshold = 2;
     const warningThreshold = 5;
     
-    // Simulate fetching inventory data
-    const mockInventoryData = [
+    // Use simple mock data to avoid connection issues
+    const mockProducts = [
       { id: "1", name: "Premium Widget Pro", stock: 0, dailySales: 2.5 },
       { id: "2", name: "Essential Tool Kit", stock: 1, dailySales: 1.2 },
       { id: "3", name: "Basic Component", stock: 3, dailySales: 0.8 },
       { id: "4", name: "Advanced Module", stock: 4, dailySales: 1.5 },
     ];
-
+    
     const criticalProducts: AlertProduct[] = [];
     const warningProducts: AlertProduct[] = [];
     const outOfStockProducts: AlertProduct[] = [];
 
-    mockInventoryData.forEach(item => {
-      const daysUntilStockout = item.dailySales > 0 ? Math.ceil(item.stock / item.dailySales) : null;
+    mockProducts.forEach(product => {
+      const daysUntilStockout = product.dailySales > 0 ? Math.ceil(product.stock / product.dailySales) : null;
       
-      if (item.stock === 0) {
+      if (product.stock === 0) {
         outOfStockProducts.push({
-          id: item.id,
-          name: item.name,
-          stock: item.stock,
+          id: product.id,
+          name: product.name,
+          stock: product.stock,
           status: 'out-of-stock',
           daysUntilStockout: 0
         });
-      } else if (item.stock <= criticalThreshold || (daysUntilStockout && daysUntilStockout <= 3)) {
+      } else if (product.stock <= criticalThreshold || (daysUntilStockout && daysUntilStockout <= 3)) {
         criticalProducts.push({
-          id: item.id,
-          name: item.name,
-          stock: item.stock,
+          id: product.id,
+          name: product.name,
+          stock: product.stock,
           status: 'critical',
           daysUntilStockout: daysUntilStockout || undefined
         });
-      } else if (item.stock <= warningThreshold || (daysUntilStockout && daysUntilStockout <= 7)) {
+      } else if (product.stock <= warningThreshold || (daysUntilStockout && daysUntilStockout <= 7)) {
         warningProducts.push({
-          id: item.id,
-          name: item.name,
-          stock: item.stock,
+          id: product.id,
+          name: product.name,
+          stock: product.stock,
           status: 'warning',
           daysUntilStockout: daysUntilStockout || undefined
         });
@@ -157,8 +166,6 @@ export function InstantAlerts() {
           );
           
           if (!exists) {
-            setToastMessage(`${newAlert.title}: ${newAlert.message}`);
-            setToastActive(true);
             return [newAlert, ...prev.slice(0, 9)]; // Keep only last 10 alerts
           }
           return prev;
@@ -171,10 +178,28 @@ export function InstantAlerts() {
     // Initial check
     checkForAlerts();
 
-    // Check every 60 seconds
-    const interval = setInterval(checkForAlerts, 60000);
+    // Check every 2 minutes (less frequent to be less intrusive)
+    const interval = setInterval(checkForAlerts, 120000);
 
     return () => clearInterval(interval);
+  }, []);
+
+  // Auto-dismiss old alerts after 10 minutes
+  useEffect(() => {
+    const autoDismissInterval = setInterval(() => {
+      const now = new Date();
+      setAlerts(prev => 
+        prev.map(alert => {
+          const ageInMinutes = (now.getTime() - alert.timestamp.getTime()) / (1000 * 60);
+          if (ageInMinutes > 10 && !alert.dismissed) {
+            return { ...alert, dismissed: true };
+          }
+          return alert;
+        })
+      );
+    }, 60000); // Check every minute
+
+    return () => clearInterval(autoDismissInterval);
   }, []);
 
   const dismissAlert = (alertId: string) => {
@@ -196,171 +221,94 @@ export function InstantAlerts() {
   const refreshAlerts = () => {
     const newAlerts = checkInventoryAlerts();
     setAlerts(newAlerts);
-    setToastMessage("Alerts refreshed");
-    setToastActive(true);
   };
 
   const activeAlerts = alerts.filter(alert => !alert.dismissed);
 
-  const toastMarkup = toastActive ? (
-    <Toast
-      content={toastMessage}
-      onDismiss={() => setToastActive(false)}
-      duration={4000}
-    />
-  ) : null;
-
   if (activeAlerts.length === 0) {
-    return (
-      <Frame>
-        {toastMarkup}
-      </Frame>
-    );
+    return null;
   }
 
+  // Hidden until further notice - notification bar disabled
+  return null;
+
   return (
-    <Frame>
-      {toastMarkup}
-      <div style={{
-        position: 'fixed',
-        top: '20px',
-        right: '20px',
-        width: '420px',
-        zIndex: 1000,
-        maxHeight: '80vh',
-        overflowY: 'auto',
-        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)'
-      }}>
-        <BlockStack gap="300">
-          {/* Header */}
-          <Card>
-            <InlineStack align="space-between" blockAlign="center">
-              <InlineStack gap="200" blockAlign="center">
-                <Icon source={AlertTriangleIcon} tone="critical" />
-                <BlockStack gap="100">
-                  <Text variant="headingSm" as="h3" fontWeight="semibold">
-                    Instant Alerts ({activeAlerts.length})
-                  </Text>
-                  <Text variant="bodySm" as="p" tone="subdued">
-                    Last check: {lastCheck.toLocaleTimeString()}
-                  </Text>
-                </BlockStack>
-              </InlineStack>
-              <InlineStack gap="100">
-                <Button 
-                  size="slim" 
-                  variant="tertiary"
-                  icon={RefreshIcon}
-                  onClick={refreshAlerts}
-                  accessibilityLabel="Refresh alerts"
-                />
-                <Button 
-                  size="slim" 
-                  variant="tertiary"
-                  onClick={dismissAllAlerts}
-                >
-                  Dismiss All
-                </Button>
-              </InlineStack>
-            </InlineStack>
-          </Card>
-
-          {/* Alert Cards */}
-          {activeAlerts.slice(0, 3).map((alert) => (
-            <Card key={alert.id} background={alert.type === 'critical' ? 'bg-surface-critical' : 'bg-surface-warning'}>
-              <BlockStack gap="200">
-                <InlineStack align="space-between" blockAlign="start">
-                  <BlockStack gap="100">
-                    <InlineStack gap="200" blockAlign="center">
-                      <Badge tone={alert.type} size="small">
-                        {alert.type.toUpperCase()}
-                      </Badge>
-                      <Text variant="bodySm" as="span" tone="subdued">
-                        {alert.timestamp.toLocaleTimeString()}
-                      </Text>
-                    </InlineStack>
-                    <Text variant="bodyMd" as="h4" fontWeight="semibold">
-                      {alert.title}
-                    </Text>
-                    <Text variant="bodySm" as="p" tone="subdued">
-                      {alert.message}
-                    </Text>
-                  </BlockStack>
-                  <Button
-                    size="slim"
-                    variant="tertiary"
-                    icon={XSmallIcon}
-                    onClick={() => dismissAlert(alert.id)}
-                    accessibilityLabel="Dismiss alert"
-                  />
-                </InlineStack>
-
-                {/* Product List */}
-                {alert.products && alert.products.length > 0 && (
-                  <BlockStack gap="100">
-                    <Text variant="bodySm" as="p" fontWeight="medium">
-                      Affected Products:
-                    </Text>
-                    {alert.products.slice(0, 3).map((product) => (
-                      <InlineStack key={product.id} align="space-between" blockAlign="center">
-                        <BlockStack gap="100">
-                          <Text variant="bodySm" as="span">
-                            {product.name}
-                          </Text>
-                          {product.daysUntilStockout !== undefined && product.daysUntilStockout > 0 && (
-                            <Text variant="bodySm" as="span" tone="subdued">
-                              ~{product.daysUntilStockout} days until stockout
-                            </Text>
-                          )}
-                        </BlockStack>
-                        <InlineStack gap="100" blockAlign="center">
-                          <Text variant="bodySm" as="span" fontWeight="semibold">
-                            {product.stock} units
-                          </Text>
-                          <Badge 
-                            tone={product.status === 'out-of-stock' ? 'critical' : product.status === 'critical' ? 'critical' : 'warning'} 
-                            size="small"
-                          >
-                            {product.status === 'out-of-stock' ? 'Out' : product.status === 'critical' ? 'Critical' : 'Low'}
-                          </Badge>
-                        </InlineStack>
-                      </InlineStack>
-                    ))}
-                    {alert.products.length > 3 && (
-                      <Text variant="bodySm" as="p" tone="subdued">
-                        +{alert.products.length - 3} more products
-                      </Text>
-                    )}
-                  </BlockStack>
-                )}
-
-                {/* Action Buttons */}
-                <InlineStack gap="200">
-                  <Button size="slim" variant="primary">
-                    View Dashboard
-                  </Button>
-                  <Button size="slim" variant="secondary">
-                    {alert.action === 'restock' ? 'Restock Now' : 
-                     alert.action === 'urgent-restock' ? 'Urgent Action' : 
-                     'Plan Restock'}
-                  </Button>
-                </InlineStack>
-              </BlockStack>
-            </Card>
-          ))}
-
-          {/* Show more indicator */}
-          {activeAlerts.length > 3 && (
-            <Card>
-              <InlineStack align="center">
-                <Text variant="bodySm" as="p" tone="subdued">
-                  +{activeAlerts.length - 3} more alerts
+    <>
+      {/* Simple bottom notification bar */}
+      {activeAlerts.length > 0 && (
+        <div style={{
+          position: 'fixed',
+          bottom: '20px',
+          left: '20px',
+          right: '20px',
+          zIndex: 100,
+          backgroundColor: '#fff',
+          border: '1px solid #E1E3E5',
+          borderRadius: '8px',
+          padding: '12px 16px',
+          boxShadow: '0 2px 12px rgba(0, 0, 0, 0.15)',
+          maxWidth: '800px',
+          margin: '0 auto'
+        }}>
+          <InlineStack align="space-between" blockAlign="center" wrap={false}>
+            <InlineStack gap="300" blockAlign="center" wrap={false}>
+              <Icon source={AlertTriangleIcon} tone="critical" />
+              <BlockStack gap="100">
+                <Text variant="bodyMd" as="span" fontWeight="medium">
+                  {activeAlerts.length} stock alert{activeAlerts.length > 1 ? 's' : ''} need attention
                 </Text>
+                <Text variant="bodySm" as="span" tone="subdued">
+                  {activeAlerts.filter(a => a.type === 'critical').length} critical, {activeAlerts.filter(a => a.type === 'warning').length} low stock
+                </Text>
+              </BlockStack>
+            </InlineStack>
+            
+            <InlineStack gap="200" blockAlign="center">
+              <Button size="slim" variant="primary" onClick={() => setIsMinimized(!isMinimized)}>
+                {isMinimized ? 'View Details' : 'Hide Details'}
+              </Button>
+              <Button 
+                size="slim" 
+                variant="tertiary"
+                onClick={dismissAllAlerts}
+              >
+                Dismiss
+              </Button>
+            </InlineStack>
+          </InlineStack>
+          
+          {/* Expandable details */}
+          {!isMinimized && (
+            <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #E1E3E5' }}>
+              <InlineStack gap="200" wrap={true}>
+                {activeAlerts.slice(0, 5).map((alert) => (
+                  <div key={alert.id} style={{
+                    padding: '8px 12px',
+                    backgroundColor: alert.type === 'critical' ? '#FEF7F0' : '#FFF9E6',
+                    border: `1px solid ${alert.type === 'critical' ? '#FFD6CC' : '#FFE066'}`,
+                    borderRadius: '6px',
+                    minWidth: '150px'
+                  }}>
+                    <BlockStack gap="100">
+                      <Text variant="bodySm" as="span" fontWeight="medium">
+                        {alert.title}
+                      </Text>
+                      <Text variant="bodySm" as="span" tone="subdued">
+                        {alert.products?.length || 0} product{(alert.products?.length || 0) > 1 ? 's' : ''}
+                      </Text>
+                    </BlockStack>
+                  </div>
+                ))}
+                {activeAlerts.length > 5 && (
+                  <Text variant="bodySm" as="span" tone="subdued">
+                    +{activeAlerts.length - 5} more
+                  </Text>
+                )}
               </InlineStack>
-            </Card>
+            </div>
           )}
-        </BlockStack>
-      </div>
-    </Frame>
+        </div>
+      )}
+    </>
   );
 }

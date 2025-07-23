@@ -94,7 +94,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       toEmail: formData.get("toEmail") as string || '',
     };
 
-    const result = await testEmailSettings(testSettings);
+    // Add required properties for SimpleEmailSettings
+    const simpleEmailSettings = {
+      enabled: testSettings.enabled,
+      recipientEmail: testSettings.toEmail,
+      shopInfo: {
+        email: testSettings.fromEmail || "shop@example.com",
+        name: "Demo Shop",
+        myshopifyDomain: "demo-shop.myshopify.com"
+      }, // Replace with actual shop info if available
+      smtpHost: testSettings.smtpHost,
+      smtpPort: testSettings.smtpPort,
+      smtpUser: testSettings.smtpUser,
+      smtpPassword: testSettings.smtpPassword,
+      fromEmail: testSettings.fromEmail,
+    };
+
+    const result = await testEmailSettings(simpleEmailSettings);
     
     return {
       success: result.success,
