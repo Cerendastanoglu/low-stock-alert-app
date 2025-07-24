@@ -102,7 +102,7 @@ export default function Index() {
 
   return (
     <Page>
-      <TitleBar title="Low Stock Alert Dashboard" />
+      <TitleBar title="Spector" />
       <BlockStack gap="500">
         <Layout>
           <Layout.Section variant="oneThird">

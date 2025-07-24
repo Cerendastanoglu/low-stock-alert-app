@@ -211,7 +211,7 @@ export default function PublicProductTracker() {
             {/* Title and Subtitle */}
             <BlockStack gap="100">
               <Text as="h1" variant="heading2xl" fontWeight="bold" tone="inherit">
-                Inventory Management Suite
+                Spector
               </Text>
               <Text as="p" variant="bodyLg" tone="inherit" fontWeight="medium">
                 Product Performance Tracker - AI-powered insights & optimization

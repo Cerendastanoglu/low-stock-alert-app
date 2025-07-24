@@ -162,8 +162,16 @@ export async function createSampleInventoryLogs(shop: string): Promise<Inventory
 
   return createdLogs.map(log => ({
     ...log,
+    changeType: log.changeType as InventoryChangeType,
+    source: log.source as InventorySource,
     variantId: log.variantId === null ? undefined : log.variantId,
     variantTitle: log.variantTitle === null ? undefined : log.variantTitle,
+    userId: log.userId === null ? undefined : log.userId,
+    userName: log.userName === null ? undefined : log.userName,
+    userEmail: log.userEmail === null ? undefined : log.userEmail,
+    orderId: log.orderId === null ? undefined : log.orderId,
+    orderNumber: log.orderNumber === null ? undefined : log.orderNumber,
+    notes: log.notes === null ? undefined : log.notes,
   }));
 }
 
@@ -172,12 +180,25 @@ export async function createSampleInventoryLogs(shop: string): Promise<Inventory
  */
 export async function createInventoryLog(data: CreateInventoryLogData): Promise<InventoryLogEntry> {
   try {
-    return await prisma.inventoryHistory.create({
+    const log = await prisma.inventoryHistory.create({
       data: {
         ...data,
         timestamp: new Date(),
       },
     });
+    return {
+      ...log,
+      changeType: log.changeType as InventoryChangeType,
+      source: log.source as InventorySource,
+      variantId: log.variantId === null ? undefined : log.variantId,
+      variantTitle: log.variantTitle === null ? undefined : log.variantTitle,
+      userId: log.userId === null ? undefined : log.userId,
+      userName: log.userName === null ? undefined : log.userName,
+      userEmail: log.userEmail === null ? undefined : log.userEmail,
+      orderId: log.orderId === null ? undefined : log.orderId,
+      orderNumber: log.orderNumber === null ? undefined : log.orderNumber,
+      notes: log.notes === null ? undefined : log.notes,
+    };
   } catch (error) {
     console.error("Error creating inventory log:", error);
     throw error;
@@ -193,7 +214,7 @@ export async function getProductInventoryLogs(
   limit: number = 50
 ): Promise<InventoryLogEntry[]> {
   try {
-    return await prisma.inventoryHistory.findMany({
+    const logsRaw = await prisma.inventoryHistory.findMany({
       where: {
         shop,
         productId,
@@ -203,6 +224,19 @@ export async function getProductInventoryLogs(
       },
       take: limit,
     });
+    return logsRaw.map(log => ({
+      ...log,
+      changeType: log.changeType as InventoryChangeType,
+      source: log.source as InventorySource,
+      variantId: log.variantId === null ? undefined : log.variantId,
+      variantTitle: log.variantTitle === null ? undefined : log.variantTitle,
+      userId: log.userId === null ? undefined : log.userId,
+      userName: log.userName === null ? undefined : log.userName,
+      userEmail: log.userEmail === null ? undefined : log.userEmail,
+      orderId: log.orderId === null ? undefined : log.orderId,
+      orderNumber: log.orderNumber === null ? undefined : log.orderNumber,
+      notes: log.notes === null ? undefined : log.notes,
+    }));
   } catch (error) {
     console.error("Error fetching product inventory logs:", error);
     return [];
@@ -271,7 +305,7 @@ export async function getInventoryLogs(
   }
 
   try {
-    const [logs, total] = await Promise.all([
+    const [logsRaw, total] = await Promise.all([
       prisma.inventoryHistory.findMany({
         where: whereConditions,
         orderBy: {
@@ -284,6 +318,20 @@ export async function getInventoryLogs(
         where: whereConditions,
       }),
     ]);
+
+    const logs: InventoryLogEntry[] = logsRaw.map(log => ({
+      ...log,
+      changeType: log.changeType as InventoryChangeType,
+      source: log.source as InventorySource,
+      variantId: log.variantId === null ? undefined : log.variantId,
+      variantTitle: log.variantTitle === null ? undefined : log.variantTitle,
+      userId: log.userId === null ? undefined : log.userId,
+      userName: log.userName === null ? undefined : log.userName,
+      userEmail: log.userEmail === null ? undefined : log.userEmail,
+      orderId: log.orderId === null ? undefined : log.orderId,
+      orderNumber: log.orderNumber === null ? undefined : log.orderNumber,
+      notes: log.notes === null ? undefined : log.notes,
+    }));
 
     return {
       logs,
@@ -391,8 +439,25 @@ export async function getInventoryLogStats(
     console.error("Error fetching inventory stats:", error);
     return {
       totalChanges: 0,
-      changesByType: {},
-      changesBySource: {},
+      changesByType: {
+          MANUAL_EDIT: 0,
+          SALE: 0,
+          RESTOCK: 0,
+          ADJUSTMENT: 0,
+          RETURN: 0,
+          TRANSFER: 0,
+          DAMAGED: 0,
+          PROMOTION: 0,
+      },
+      changesBySource: {
+          ADMIN: 0,
+          POS: 0,
+          APP: 0,
+          WEBHOOK: 0,
+          MANUAL: 0,
+          SHOPIFY_FLOW: 0,
+          API: 0
+      },
       topProducts: [],
       recentActivity: 0,
     };

@@ -10,6 +10,7 @@ import {
 import { AppProvider } from "@shopify/polaris";
 import translations from "@shopify/polaris/locales/en.json";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 // Polaris fonts (already in your code)
 const shopifyFontLinks = [
@@ -21,11 +22,10 @@ const shopifyFontLinks = [
   />,
 ];
 
-export const meta: MetaFunction = () => [{ title: "Inventory Management Suite" }];
+export const meta: MetaFunction = () => [{ title: "Spector" }];
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: polarisStyles },
-  { rel: "preload", href: "/app/styles/targeted-enhancements.css", as: "style" },
 ];
 
 export default function App() {
@@ -64,14 +64,15 @@ export default function App() {
             img.loaded { opacity: 1; }
           `
         }} />
-        <script
-          src="https://cdn.shopify.com/shopifycloud/app-bridge.js"
-          async
-        ></script>
       </head>
       <body>
+        <script
+          src="https://cdn.shopify.com/shopifycloud/app-bridge.js"
+        ></script>
         <AppProvider i18n={translations}>
-          <Outlet />
+          <ErrorBoundary>
+            <Outlet />
+          </ErrorBoundary>
         </AppProvider>
         <ScrollRestoration />
         <Scripts />

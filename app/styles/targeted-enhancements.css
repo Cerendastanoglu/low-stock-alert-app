@@ -1,4 +1,4 @@
-/* Targeted UI Enhancements for Low Stock Alert App */
+/* Targeted UI Enhancements for Spector */
 
 /* Enhanced Threshold Control Section */
 .threshold-control-section {
@@ -563,6 +563,57 @@
 
 .reload-button:active {
   transform: translateY(0) !important;
+}
+
+/* Enhanced Prominent Reload Button */
+.reload-button-prominent {
+  background: linear-gradient(45deg, #059669, #10b981) !important;
+  color: white !important;
+  border: 2px solid #047857 !important;
+  border-radius: 12px !important;
+  padding: 12px 20px !important;
+  font-weight: 600 !important;
+  font-size: 14px !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  cursor: pointer !important;
+  box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25) !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+.reload-button-prominent::before {
+  content: '' !important;
+  position: absolute !important;
+  top: 0 !important;
+  left: -100% !important;
+  width: 100% !important;
+  height: 100% !important;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent) !important;
+  transition: left 0.5s !important;
+}
+
+.reload-button-prominent:hover {
+  background: linear-gradient(45deg, #047857, #059669) !important;
+  transform: translateY(-2px) scale(1.02) !important;
+  box-shadow: 0 8px 20px rgba(5, 150, 105, 0.4) !important;
+  border-color: #10b981 !important;
+}
+
+.reload-button-prominent:hover::before {
+  left: 100% !important;
+}
+
+.reload-button-prominent:active {
+  transform: translateY(-1px) scale(1.01) !important;
+  box-shadow: 0 4px 15px rgba(5, 150, 105, 0.35) !important;
+}
+
+.reload-button-prominent span {
+  font-weight: 600 !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1) !important;
 }
 
 /* Help Button Styles */

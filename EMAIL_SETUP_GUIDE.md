@@ -1,6 +1,6 @@
 # Email Notification Setup Guide
 
-This guide will help you set up email notifications for your Low Stock Alert app.
+This guide will help you set up email notifications for your Spector app.
 
 ## 📧 Email Notification Features
 
@@ -13,7 +13,7 @@ Your app now includes:
 ## ⚙️ Setting Up Email Notifications
 
 ### 1. Access Email Settings
-- Open your Low Stock Alert Dashboard
+- Open your Spector Dashboard
 - Click the **"Email Settings"** button in the sidebar
 - Or navigate directly to `/app/email-settings`
 

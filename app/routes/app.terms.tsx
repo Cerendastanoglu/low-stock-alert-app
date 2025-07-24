@@ -56,7 +56,7 @@ export default function Terms() {
               Terms of Service
             </Text>
             <Text as="p" variant="bodyLg" tone="inherit" fontWeight="medium">
-              Low Stock Alert App - Terms and Conditions
+              Spector - Terms and Conditions
             </Text>
           </BlockStack>
           
@@ -90,7 +90,7 @@ export default function Terms() {
                   1. Introduction
                 </Text>
                 <Text as="p" variant="bodyMd">
-                  Welcome to the Low Stock Alert App ("the App"). These Terms of Service ("Terms") govern your use of our inventory management application designed for Shopify merchants. By installing, accessing, or using the App, you agree to be bound by these Terms.
+                  Welcome to Spector ("the App"). These Terms of Service ("Terms") govern your use of our inventory management application designed for Shopify merchants. By installing, accessing, or using the App, you agree to be bound by these Terms.
                 </Text>
                 <Text as="p" variant="bodyMd">
                   The App is developed and maintained by Ceren's Atelier Art ("we," "us," or "our"). If you disagree with any part of these Terms, please do not use the App.
@@ -105,10 +105,10 @@ export default function Terms() {
                   2. App Description and Features
                 </Text>
                 <Text as="p" variant="bodyMd">
-                  The Low Stock Alert App provides the following features:
+                  Spector provides the following features:
                 </Text>
                 <BlockStack gap="200">
-                  <Text as="p" variant="bodyMd">• Real-time inventory monitoring and low stock alerts</Text>
+                  <Text as="p" variant="bodyMd">• Real-time inventory monitoring and stock alerts</Text>
                   <Text as="p" variant="bodyMd">• AI-powered sales forecasting and stockout predictions</Text>
                   <Text as="p" variant="bodyMd">• Email notifications for inventory management</Text>
                   <Text as="p" variant="bodyMd">• Inventory history tracking and analytics</Text>

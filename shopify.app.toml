@@ -1,9 +1,9 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "eb3e85d01989aa2d6f08378b8df5a312"
-name = "low-stock-alert-app"
-handle = "low-stock-alert-app-1"
-application_url = "https://garage-je-infections-exceed.trycloudflare.com"
+name = "spector"
+handle = "spector-1"
+application_url = "https://humanities-registered-astronomy-matters.trycloudflare.com"
 embedded = true
 
 [build]
@@ -26,7 +26,7 @@ api_version = "2025-07"
 scopes = "write_products,read_orders"
 
 [auth]
-redirect_urls = ["https://garage-je-infections-exceed.trycloudflare.com/auth/callback", "https://garage-je-infections-exceed.trycloudflare.com/auth/shopify/callback", "https://garage-je-infections-exceed.trycloudflare.com/api/auth/callback"]
+redirect_urls = ["https://humanities-registered-astronomy-matters.trycloudflare.com/auth/callback", "https://humanities-registered-astronomy-matters.trycloudflare.com/auth/shopify/callback", "https://humanities-registered-astronomy-matters.trycloudflare.com/api/auth/callback"]
 
 [pos]
 embedded = false

@@ -40,7 +40,7 @@ export default function PublicDashboard() {
             marginBottom: '1rem',
             color: '#202223'
           }}>
-            Inventory Management Suite
+            Spector
           </h1>
           <p style={{ 
             color: '#6D7175',

@@ -56,7 +56,7 @@ export default function Privacy() {
               Privacy Policy
             </Text>
             <Text as="p" variant="bodyLg" tone="inherit" fontWeight="medium">
-              Low Stock Alert App - Data Protection and Privacy
+              Spector - Data Protection and Privacy
             </Text>
           </BlockStack>
           
@@ -90,7 +90,7 @@ export default function Privacy() {
                   1. Introduction
                 </Text>
                 <Text as="p" variant="bodyMd">
-                  This Privacy Policy describes how the Low Stock Alert App ("we," "us," or "our") collects, uses, and protects information when you use our inventory management application for Shopify stores.
+                  This Privacy Policy describes how Spector ("we," "us," or "our") collects, uses, and protects information when you use our inventory management application for Shopify stores.
                 </Text>
                 <Text as="p" variant="bodyMd">
                   We are committed to protecting your privacy and ensuring the security of your data. This policy explains what information we collect, how we use it, and your rights regarding your data.
@@ -143,7 +143,7 @@ export default function Privacy() {
                   We use the collected information solely to provide and improve our services:
                 </Text>
                 <BlockStack gap="200">
-                  <Text as="p" variant="bodyMd">• <strong>Inventory Monitoring:</strong> Track stock levels and generate low stock alerts</Text>
+                  <Text as="p" variant="bodyMd">• <strong>Inventory Monitoring:</strong> Track stock levels and generate stock alerts</Text>
                   <Text as="p" variant="bodyMd">• <strong>Sales Forecasting:</strong> Analyze historical data to predict future inventory needs</Text>
                   <Text as="p" variant="bodyMd">• <strong>Email Notifications:</strong> Send alerts about low inventory and stockout predictions</Text>
                   <Text as="p" variant="bodyMd">• <strong>Analytics:</strong> Provide inventory insights and reporting</Text>

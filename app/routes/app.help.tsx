@@ -62,7 +62,7 @@ export default function Help() {
           
           <BlockStack gap="100">
             <Text as="h1" variant="heading2xl" fontWeight="bold" tone="inherit">
-              Low Stock Alert App Documentation
+              Spector Documentation
             </Text>
             <Text as="p" variant="bodyLg" tone="inherit" fontWeight="medium">
               Complete guide to managing your inventory with intelligent alerts and forecasting
@@ -461,14 +461,14 @@ export default function Help() {
                 
                 <Banner title="Get personalized support" tone="info">
                   <p>
-                    Our support team is here to help you get the most out of your Low Stock Alert App. 
+                    Our support team is here to help you get the most out of Spector. 
                     Whether you need help with setup, configuration, or have questions about features, we're ready to assist.
                   </p>
                 </Banner>
                 
                 <InlineStack gap="300" align="center">
                   <Button
-                    onClick={() => window.open('mailto:ceren@cerensatelier.art?subject=Low Stock Alert App - Support Request', '_blank')}
+                    onClick={() => window.open('mailto:ceren@cerensatelier.art?subject=Spector - Support Request', '_blank')}
                     variant="primary"
                     size="large"
                     icon={EmailIcon}

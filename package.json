@@ -1,5 +1,5 @@
 {
-  "name": "low-stock-alert-app",
+  "name": "spector",
   "private": true,
   "scripts": {
     "build": "remix vite:build",

@@ -21,8 +21,10 @@ import {
   Select,
   Tooltip,
   Collapsible,
+  Spinner,
 } from "@shopify/polaris";
 import "../styles/targeted-enhancements.css";
+import { ClientErrorFilter } from "../components/ClientErrorFilter";
 import {
   AlertTriangleIcon,
   InventoryIcon,
@@ -33,6 +35,9 @@ import {
   ChevronUpIcon,
   ClockIcon,
   InfoIcon,
+  ViewIcon,
+  HideIcon,
+  RefreshIcon,
 } from "@shopify/polaris-icons";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
@@ -51,6 +56,8 @@ interface Product {
   stock: number;
   image?: string | null;
   imageAlt?: string;
+  status?: 'ACTIVE' | 'DRAFT' | 'ARCHIVED';
+  handle?: string;
   salesVelocity?: {
     daily: number;
     weekly: number;
@@ -110,6 +117,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             node {
               id
               title
+              handle
+              status
               totalInventory
               featuredMedia {
                 ... on MediaImage {
@@ -150,6 +159,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return {
       id: node.id,
       name: node.title,
+      handle: node.handle,
+      status: node.status,
       stock: node.variants.edges[0]?.node.inventoryQuantity || 0,
       variantId: node.variants.edges[0]?.node.id,
       image: imageUrl,
@@ -221,6 +232,59 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     };
   });
 
+  // Smart category detection based on product title
+  const detectProductCategory = (productTitle: string): string => {
+    const title = productTitle.toLowerCase();
+    
+    // Apparel/Clothing detection
+    if (/shirt|jean|pant|dress|shoe|sneaker|jacket|coat|sweater|hoodie|top|bottom|hat|cap|socks|underwear|bra|bikini|swimwear|shorts|skirt|blouse|cardigan|vest|tie|scarf|gloves|belt|clothing|apparel|fashion/.test(title)) {
+      return 'Clothing';
+    }
+    
+    // Electronics detection
+    if (/electronic|phone|headphone|speaker|computer|laptop|tablet|camera|tv|gaming|tech|wireless|bluetooth|charger|cable|mouse|keyboard|monitor|processor|memory|hard drive|ssd|gpu|cpu/.test(title)) {
+      return 'Electronics';
+    }
+    
+    // Food & Beverage detection
+    if (/food|snack|coffee|tea|chocolate|candy|beverage|drink|supplement|protein|vitamin|nutrition|organic|juice|water|soda|energy|bar|cookie|chip|sauce|spice|pasta|rice|cereal/.test(title)) {
+      return 'Food & Beverage';
+    }
+    
+    // Fitness & Sports detection
+    if (/fitness|sport|gym|workout|exercise|yoga|protein|supplement|athletic|running|bike|bicycle|ball|equipment|weight|dumbbell|treadmill|mat|tennis|football|basketball|soccer|golf/.test(title)) {
+      return 'Fitness';
+    }
+    
+    // Home & Garden detection
+    if (/home|kitchen|decor|furniture|candle|mug|cup|plate|bowl|cleaning|garden|plant|pot|vase|lamp|pillow|blanket|towel|sheet|curtain|rug|mirror|clock|frame|storage/.test(title)) {
+      return 'Home & Garden';
+    }
+    
+    // Beauty & Personal Care detection
+    if (/beauty|skincare|makeup|cosmetic|perfume|cologne|shampoo|conditioner|lotion|cream|soap|moisturizer|serum|foundation|lipstick|mascara|nail|hair|face|body|skincare/.test(title)) {
+      return 'Beauty';
+    }
+    
+    // Books & Media detection
+    if (/book|novel|magazine|dvd|cd|vinyl|music|movie|game|board game|puzzle|educational|learning|textbook|guide|manual/.test(title)) {
+      return 'Books & Media';
+    }
+    
+    // Toys & Games detection
+    if (/toy|doll|action figure|lego|puzzle|board game|card game|video game|console|controller|plush|stuffed animal|educational toy/.test(title)) {
+      return 'Toys & Games';
+    }
+    
+    // Automotive detection
+    if (/car|auto|vehicle|tire|oil|brake|engine|battery|automotive|motorcycle|bike part|helmet|accessories/.test(title)) {
+      return 'Automotive';
+    }
+    
+    // Default fallback
+    return 'General';
+  };
+
   // Add Product Tracker data - using real products
   const productTrackerData = productsWithForecasting.map((product: any) => {
     // Calculate how long product has been in the store (simulated)
@@ -238,7 +302,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       createdAt: createdAt.toISOString().split('T')[0],
       lastSoldDate: lastSoldDate.toISOString().split('T')[0],
       price: (Math.random() * 100 + 10).toFixed(2), // Random price between $10-$110
-      category: ['Clothing', 'Electronics', 'Home & Garden', 'Fitness', 'Food & Beverage'][Math.floor(Math.random() * 5)]
+      category: detectProductCategory(product.title || '')
     };
   });
 
@@ -520,6 +584,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   if (actionType === "updateOutOfStockVisibility") {
+    // First ensure visibility settings are enabled
+    updateVisibilitySettings({ 
+      enabled: true, 
+      hideOutOfStock: true, 
+      showWhenRestocked: true 
+    });
+    
     // Get all products first
     const { admin, session } = await authenticate.admin(request);
     
@@ -603,6 +674,48 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return result;
   }
 
+  if (actionType === "hideSelectedProducts") {
+    try {
+      const formData = await request.formData();
+      const selectedProductIds = formData.get("selectedProductIds") as string;
+      
+      if (!selectedProductIds) {
+        return { success: false, error: "No products selected" };
+      }
+
+      // Parse the comma-separated product IDs
+      const productIds = selectedProductIds.split(',').filter(id => id.trim());
+      
+      if (productIds.length === 0) {
+        return { success: false, error: "No valid product IDs provided" };
+      }
+
+      // Auto-enable visibility settings
+      updateVisibilitySettings({
+        enabled: true,
+        hideOutOfStock: true
+      });
+
+      // Create product array with id and stock=0 to indicate we want to hide them
+      const productsToHide = productIds.map(id => ({ id, stock: 0 }));
+
+      // Use bulk update to hide selected products
+      const result = await bulkUpdateProductVisibility(request, productsToHide);
+
+      if (result.success) {
+        return { 
+          success: true, 
+          message: `Successfully processed ${productIds.length} selected product${productIds.length > 1 ? 's' : ''}` 
+        };
+      } else {
+        return { success: false, error: result.message || "Failed to update products" };
+      }
+    } catch (error) {
+      console.error("Error hiding selected products:", error);
+      return { success: false, error: "Failed to hide selected products" };
+    }
+  }
+
   if (actionType === "createSampleLogs") {
     try {
       const { createSampleDataWithSQL } = await import("../services/inventory-test.server");
@@ -623,6 +736,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return { success: false, message: "Unknown action" };
 };
 
+// Helper function to generate store URL for products
+function getProductStoreUrl(shopDomain: string, handle: string): string {
+  // Remove any existing protocol and ensure we use https
+  const cleanDomain = shopDomain.replace(/^https?:\/\//, '');
+  return `https://${cleanDomain}/products/${handle}`;
+}
+
 export default function Index() {
   const { products, productTrackerData, shopInfo, visibilitySettings } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
@@ -633,6 +753,8 @@ export default function Index() {
   
   // Notification settings modal state
   const [showNotificationSettings, setShowNotificationSettings] = useState(false);
+  const [showAlertSettings, setShowAlertSettings] = useState(false);
+  const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
   const [localNotificationSettings, setLocalNotificationSettings] = useState(notificationSettings);
   
   // Storefront visibility settings modal state
@@ -648,6 +770,9 @@ export default function Index() {
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [showSuggestionModal, setShowSuggestionModal] = useState(false);
   const [showDisclaimerModal, setShowDisclaimerModal] = useState(false);
+  const [isDataAnalysisModalOpen, setIsDataAnalysisModalOpen] = useState(false);
+  const [analysisData, setAnalysisData] = useState<any>(null);
+  const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
   
   const timePeriodOptions = [
     { label: 'Daily', value: 'daily' },
@@ -657,17 +782,27 @@ export default function Index() {
 
   // Product Tracker helper functions
   const getDaysInStore = (createdAt: string) => {
-    const created = new Date(createdAt);
-    const now = new Date();
-    const diffTime = Math.abs(now.getTime() - created.getTime());
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    if (!createdAt) return 0;
+    try {
+      const created = new Date(createdAt);
+      const now = new Date();
+      const diffTime = Math.abs(now.getTime() - created.getTime());
+      return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    } catch (error) {
+      return 0;
+    }
   };
 
   const getDaysSinceLastSale = (lastSoldDate: string) => {
-    const lastSale = new Date(lastSoldDate);
-    const now = new Date();
-    const diffTime = Math.abs(now.getTime() - lastSale.getTime());
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    if (!lastSoldDate) return 0;
+    try {
+      const lastSale = new Date(lastSoldDate);
+      const now = new Date();
+      const diffTime = Math.abs(now.getTime() - lastSale.getTime());
+      return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    } catch (error) {
+      return 0;
+    }
   };
 
   const getStaleStatus = (daysInStore: number, daysSinceLastSale: number) => {
@@ -678,48 +813,228 @@ export default function Index() {
   };
 
   const generateAISuggestions = (product: any) => {
-    const daysInStore = getDaysInStore(product.createdAt);
-    const daysSinceLastSale = getDaysSinceLastSale(product.lastSoldDate);
-    const status = getStaleStatus(daysInStore, daysSinceLastSale);
-    
-    const suggestions = [];
-    
-    if (status === 'critical') {
-      suggestions.push({
-        type: 'clearance',
-        title: 'Deep Discount Sale',
-        description: `Reduce price by 40-60% to clear stale inventory`,
-        action: `Set sale price: $${(product.price * 0.5).toFixed(2)}`
-      });
-      suggestions.push({
-        type: 'bundle',
-        title: 'Bundle Deal',
-        description: 'Create bundle with popular items to move inventory',
-        action: 'Create "Mystery Bundle" with 3 slow-moving items'
-      });
-    } else if (status === 'warning') {
-      suggestions.push({
-        type: 'promotion',
-        title: 'Limited Time Offer',
-        description: 'Create urgency with time-limited promotion',
-        action: `20-30% off for next 7 days - Save $${(product.price * 0.25).toFixed(2)}`
-      });
-      suggestions.push({
-        type: 'cross-sell',
-        title: 'Cross-Selling Campaign',
-        description: 'Pair with complementary fast-moving products',
-        action: 'Add to "Customers also bought" recommendations'
-      });
-    } else if (status === 'attention') {
-      suggestions.push({
-        type: 'visibility',
-        title: 'Boost Visibility',
-        description: 'Feature in newsletter or social media',
-        action: 'Add to homepage "Featured Products" section'
-      });
+    // Always generate new, unique, actionable suggestions per click, per product
+    if (!product) {
+      return [{
+        type: 'error',
+        title: 'Product Data Unavailable',
+        description: 'Unable to generate suggestions without product information',
+        action: 'Please refresh the page and try again',
+        apps: [],
+        upsell: ''
+      }];
     }
-    
+
+    // Use product details for uniqueness
+    const productName = (product.title || '').trim();
+    const category = (product.category || '').toLowerCase() || (() => {
+      const t = productName.toLowerCase();
+      if (/shirt|jean|pant|dress|shoe|sneaker|jacket|coat|sweater|hoodie|clothing|apparel|fashion/.test(t)) return 'clothing';
+      if (/electronic|phone|headphone|speaker|computer|laptop|tablet|camera|tech|wireless|bluetooth/.test(t)) return 'electronics';
+      if (/food|snack|coffee|tea|chocolate|candy|beverage|drink|supplement|protein|vitamin/.test(t)) return 'food';
+      if (/fitness|sport|gym|workout|exercise|yoga|athletic|running|equipment|weight/.test(t)) return 'fitness';
+      if (/home|kitchen|decor|furniture|candle|mug|cup|plate|bowl|cleaning|garden/.test(t)) return 'home';
+      if (/beauty|skincare|makeup|cosmetic|perfume|cologne|shampoo|conditioner|lotion/.test(t)) return 'beauty';
+      return 'general';
+    })();
+    const price = parseFloat(product.price) || 0;
+    const stock = product.totalInventory || product.stock || 0;
+    const now = Date.now();
+
+    // Use randomness and product details for uniqueness
+    function randomSeeded(str: string) {
+      // Simple hash for repeatable randomness per click
+      let hash = 0;
+      for (let i = 0; i < str.length; i++) hash = ((hash << 5) - hash) + str.charCodeAt(i);
+      hash = Math.abs(hash + now + Math.floor(Math.random() * 100000));
+      return hash;
+    }
+
+    // Generate 3 unique suggestions per click
+    const suggestions = Array.from({ length: 3 }).map((_, i) => {
+      const seed = randomSeeded(productName + category + price + stock + i);
+      
+      // Creative marketing strategies with specific upsells
+      const strategies = [
+        {
+          title: 'Limited Edition Collectible Strategy',
+          description: 'Transform this product into a limited-edition collectible with unique serial numbers and storytelling.',
+          action: 'Create numbered editions with certificates of authenticity and backstory cards',
+          upsell: 'Offer exclusive collector membership with early access to future limited editions and bonus collectible items'
+        },
+        {
+          title: 'Surprise Bundle Experience',
+          description: 'Bundle with complementary accessories that enhance the product experience in unexpected ways.',
+          action: 'Design mystery bundles where customers get surprise accessories worth 30% more than they pay',
+          upsell: 'Create premium bundle tiers with increasingly valuable surprise items and exclusive access perks'
+        },
+        {
+          title: 'Live Event Marketing',
+          description: 'Host interactive events, challenges, or demonstrations centered around this product.',
+          action: 'Organize virtual or in-person events where customers can experience the product in unique ways',
+          upsell: 'Offer VIP event packages with exclusive product variants, meet-and-greets, and behind-the-scenes access'
+        },
+        {
+          title: 'Customer Co-Creation Campaign',
+          description: 'Engage customers in designing new features, colors, or uses for this product.',
+          action: 'Launch design contests where winning ideas become limited releases with customer credit',
+          upsell: 'Provide custom design services where customers can create personalized versions of their winning concepts'
+        },
+        {
+          title: 'Subscription Service Model',
+          description: 'Convert one-time purchases into recurring relationships with refills, updates, or seasonal variants.',
+          action: 'Develop subscription boxes with product refills, seasonal variants, or complementary items',
+          upsell: 'Offer premium subscription tiers with exclusive products, priority support, and customization options'
+        },
+        {
+          title: 'Influencer Collaboration',
+          description: 'Partner with artists, creators, or local influencers for unique product collaborations.',
+          action: 'Create limited artist editions with unique designs, packaging, or product modifications',
+          upsell: 'Develop signature collaboration lines with multiple artists and exclusive collector packaging'
+        },
+        {
+          title: 'Gamified Purchase Experience',
+          description: 'Add gaming elements like rewards, achievements, or instant-win opportunities to purchases.',
+          action: 'Create loyalty point systems with unlockable rewards and achievement badges',
+          upsell: 'Offer premium gaming tiers with exclusive rewards, early access, and special achievement levels'
+        },
+        {
+          title: 'Social Media Trend Creation',
+          description: 'Launch hashtag challenges or social trends that showcase creative uses of the product.',
+          action: 'Design viral challenges with prizes for most creative product uses or styling',
+          upsell: 'Create branded challenge kits with props, backgrounds, and exclusive items for content creation'
+        },
+        {
+          title: 'AR/Digital Experience',
+          description: 'Develop augmented reality features or digital twins that enhance the physical product.',
+          action: 'Build AR apps that show product customizations, uses, or virtual try-on experiences',
+          upsell: 'Offer premium digital features like advanced customization tools, exclusive AR content, or virtual styling'
+        },
+        {
+          title: 'Mystery Upgrade Program',
+          description: 'Surprise random customers with free upgrades, bonus features, or exclusive variants.',
+          action: 'Implement random upgrade system where some orders include surprise premium versions',
+          upsell: 'Create "Upgrade Insurance" where customers can guarantee premium versions and exclusive features'
+        },
+        {
+          title: 'Product Community Building',
+          description: 'Create exclusive communities for product owners with expert tips, advanced techniques, and networking.',
+          action: 'Build private communities with expert-led workshops, advanced tips, and member networking',
+          upsell: 'Offer premium community tiers with one-on-one expert consultations and exclusive masterclasses'
+        },
+        {
+          title: 'Trade-In and Upcycle Program',
+          description: 'Accept older versions for trade-in credit while promoting sustainability and brand loyalty.',
+          action: 'Launch trade-in programs with credit toward new purchases and upcycling workshops',
+          upsell: 'Provide premium upcycling services where old products become custom art pieces or functional items'
+        },
+        {
+          title: 'Care and Enhancement Kit',
+          description: 'Develop maintenance, enhancement, or customization kits that extend product life and value.',
+          action: 'Create care kits with tools, instructions, and enhancement options specific to the product',
+          upsell: 'Offer professional care services, advanced enhancement kits, and custom modification options'
+        },
+        {
+          title: 'Personalization Service',
+          description: 'Add custom engraving, messages, or modifications that make each product unique to its owner.',
+          action: 'Offer personalization options like engraving, custom colors, or personal message inclusion',
+          upsell: 'Provide luxury personalization with hand-crafted elements, premium materials, or artist signatures'
+        },
+        {
+          title: 'Behind-the-Scenes Storytelling',
+          description: 'Share the creation process, maker stories, and journey of the product from concept to customer.',
+          action: 'Create documentary-style content showing product creation, team stories, and quality processes',
+          upsell: 'Offer factory tours, maker meet-and-greets, and exclusive access to product development processes'
+        },
+        {
+          title: 'Cause-Related Marketing',
+          description: 'Partner with charities or causes relevant to the product, donating portions of proceeds.',
+          action: 'Identify aligned causes and donate percentage of sales while highlighting impact to customers',
+          upsell: 'Create premium "impact editions" where higher prices fund larger donations and exclusive impact reporting'
+        },
+        {
+          title: 'Content Creation Contest',
+          description: 'Host contests for customer-generated content like unboxing videos, reviews, or creative uses.',
+          action: 'Run monthly contests with prizes for best videos, photos, or creative product demonstrations',
+          upsell: 'Offer professional content creation services and premium contest entries with guaranteed features'
+        },
+        {
+          title: 'Dynamic Pricing Strategy',
+          description: 'Use time-based or engagement-based pricing that creates urgency and rewards early adopters.',
+          action: 'Implement hourly price drops, early bird specials, or engagement-based discounts',
+          upsell: 'Create VIP pricing tiers with guaranteed best prices, early access, and exclusive pricing alerts'
+        },
+        {
+          title: 'Product Journey Tracking',
+          description: 'Provide digital passports that track the product journey, updates, and owner history.',
+          action: 'Create digital certificates with QR codes tracking product history, care tips, and updates',
+          upsell: 'Offer premium tracking with detailed analytics, upgrade notifications, and exclusive owner benefits'
+        },
+        {
+          title: 'Customer-Voted Variants',
+          description: 'Let customers vote on new colors, features, or limited editions, creating community investment.',
+          action: 'Run voting campaigns for new variants with guaranteed production of winning options',
+          upsell: 'Offer early access to voted variants, voter-exclusive colors, and custom voting power for premium members'
+        }
+      ];
+      
+      // Pick a strategy based on seed
+      const strategy = strategies[seed % strategies.length];
+      
+      return {
+        type: 'ai-suggestion',
+        title: strategy.title,
+        description: strategy.description,
+        action: strategy.action,
+        apps: [], // No fake apps, only actionable ideas
+        upsell: strategy.upsell
+      };
+    });
     return suggestions;
+  };
+
+  // Fetch real competitor and market data
+  const fetchProductAnalysis = async (product: any) => {
+    setIsLoadingAnalysis(true);
+    try {
+      const productName = product.title || '';
+      const category = product.category || '';
+      const price = parseFloat(product.price) || 0;
+
+      // Call our API endpoint for real-time analysis
+      const response = await fetch('/api/product-analysis', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          productName,
+          category,
+          price
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch analysis data');
+      }
+
+      const analysisResults = await response.json();
+      setAnalysisData(analysisResults);
+    } catch (error) {
+      console.error('Error fetching analysis:', error);
+      setAnalysisData({
+        error: 'Unable to fetch analysis data. Please try again later.',
+        productName: product.title || 'Unknown Product'
+      });
+    } finally {
+      setIsLoadingAnalysis(false);
+    }
+  };
+
+  const handleDataAnalysis = (product: any) => {
+    setSelectedProduct(product);
+    setIsDataAnalysisModalOpen(true);
+    fetchProductAnalysis(product);
   };
 
   const generateDataDrivenSuggestions = (product: any) => {
@@ -780,8 +1095,12 @@ export default function Index() {
   };
 
   const handleProductSuggestions = (product: any, type: 'ai' | 'data') => {
-    setSelectedProduct({ ...product, suggestionType: type });
-    setShowSuggestionModal(true);
+    if (type === 'ai') {
+      setSelectedProduct({ ...product, suggestionType: type });
+      setShowSuggestionModal(true);
+    } else if (type === 'data') {
+      handleDataAnalysis(product);
+    }
   };
 
   const handleNotificationSettingChange = (section: 'email' | 'slack' | 'discord', field: string, value: string | boolean) => {
@@ -877,6 +1196,28 @@ export default function Index() {
   // Initialize toggles from real notification settings
   const [oosEmailEnabled, setOosEmailEnabled] = useState(notificationSettings.email.oosAlertsEnabled);
   const [criticalEmailEnabled, setCriticalEmailEnabled] = useState(notificationSettings.email.criticalAlertsEnabled);
+
+  // Helper functions for product selection
+  const toggleProductSelection = (productId: string) => {
+    setSelectedProducts(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(productId)) {
+        newSet.delete(productId);
+      } else {
+        newSet.add(productId);
+      }
+      return newSet;
+    });
+  };
+
+  const selectAllOOSProducts = () => {
+    const oosProductIds = zeroStockProducts.map((p: Product) => p.id);
+    setSelectedProducts(new Set(oosProductIds));
+  };
+
+  const clearSelection = () => {
+    setSelectedProducts(new Set());
+  };
 
   const handleThresholdChange = (value: string) => {
     const numValue = parseInt(value, 10) || 5;
@@ -977,7 +1318,7 @@ export default function Index() {
   if (isLoading) {
     return (
       <Page>
-        <TitleBar title="Low Stock Alert Dashboard" />
+        <TitleBar title="Spector" />
         
         {/* Header Skeleton */}
         <div style={{
@@ -1070,7 +1411,8 @@ export default function Index() {
 
   return (
     <Page>
-      <TitleBar title="Low Stock Alert Dashboard" />
+      <ClientErrorFilter />
+      <TitleBar title="Spector" />
       
       {/* Header with Logo and Title */}
       <div style={{ 
@@ -1099,7 +1441,7 @@ export default function Index() {
           {/* Title and Subtitle */}
           <BlockStack gap="100">
             <Text as="h1" variant="heading2xl" fontWeight="bold" tone="inherit">
-              Inventory Management Suite
+              Spector
             </Text>
             <Text as="p" variant="bodyLg" tone="subdued" fontWeight="medium">
               Real-time stock monitoring, forecasting & multi-channel alerts
@@ -1108,14 +1450,16 @@ export default function Index() {
           
           {/* Status Indicators and Action Buttons */}
           <div style={{ marginLeft: 'auto' }}>
-            <InlineStack gap="200">
+            <InlineStack gap="300">
+              {/* Enhanced Reload Button */}
               <button
                 onClick={() => window.location.reload()}
-                className="reload-button"
+                className="reload-button reload-button-prominent"
                 type="button"
                 title="Reload inventory data"
               >
-                Reload
+                <Icon source={RefreshIcon} />
+                <span>Reload Data</span>
               </button>
               
               <div style={{
@@ -1154,204 +1498,445 @@ export default function Index() {
           </div>
         </InlineStack>
         
-        {/* Enhanced Threshold Control with Email Alerts */}
+        {/* Inventory Summary - Compact Header Version */}
         <div style={{
           marginTop: '1.5rem',
           paddingTop: '1.5rem',
           borderTop: '1px solid rgba(226, 232, 240, 0.6)'
         }}>
-          <BlockStack gap="400">
-            {/* Header Section */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(4, 1fr)',
+            gap: '1rem',
+            padding: '1rem',
+            background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)',
+            borderRadius: '10px',
+            border: '1px solid #e2e8f0'
+          }}>
+            {/* Out of Stock - Critical */}
+            <div style={{
+              textAlign: 'center',
+              padding: '0.75rem',
+              background: 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)',
+              borderRadius: '8px',
+              border: '1px solid #fecaca'
+            }}>
+              <Text as="p" variant="headingLg" fontWeight="bold" tone="critical">
+                {zeroStockProducts.length}
+              </Text>
+              <Text as="p" variant="bodySm" tone="subdued" fontWeight="medium">
+                Out of Stock
+              </Text>
+            </div>
+            
+            {/* Low Stock - Warning */}
+            <div style={{
+              textAlign: 'center',
+              padding: '0.75rem',
+              background: 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)',
+              borderRadius: '8px',
+              border: '1px solid #fcd34d'
+            }}>
+              <Text as="p" variant="headingLg" fontWeight="bold" tone="critical">
+                {lowStockProducts.length}
+              </Text>
+              <Text as="p" variant="bodySm" tone="subdued" fontWeight="medium">
+                Low Stock
+              </Text>
+            </div>
+            
+            {/* Healthy Stock - Success */}
+            <div style={{
+              textAlign: 'center',
+              padding: '0.75rem',
+              background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)',
+              borderRadius: '8px',
+              border: '1px solid #86efac'
+            }}>
+              <Text as="p" variant="headingLg" fontWeight="bold" tone="success">
+                {(products.length - lowStockProducts.length - zeroStockProducts.length).toString()}
+              </Text>
+              <Text as="p" variant="bodySm" tone="subdued" fontWeight="medium">
+                Healthy
+              </Text>
+            </div>
+            
+            {/* Total Products - Info */}
+            <div style={{
+              textAlign: 'center',
+              padding: '0.75rem',
+              background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+              borderRadius: '8px',
+              border: '1px solid #93c5fd'
+            }}>
+              <Text as="p" variant="headingLg" fontWeight="bold" tone="base">
+                {products.length}
+              </Text>
+              <Text as="p" variant="bodySm" tone="subdued" fontWeight="medium">
+                Total Products
+              </Text>
+            </div>
+          </div>
+        </div>
+        
+        {/* Enhanced Threshold Control with Email Alerts - Collapsible Section */}
+        <div style={{
+          marginTop: '1.5rem',
+          paddingTop: '1.5rem',
+          borderTop: '1px solid rgba(226, 232, 240, 0.6)'
+        }}>
+          <BlockStack gap="300">
+            {/* Header Section with Toggle */}
             <InlineStack align="space-between" blockAlign="center">
-              <div>
-                <Text as="h3" variant="headingMd" fontWeight="medium">
-                  Low Stock Alert Settings
-                </Text>
-                <Text as="p" variant="bodyMd" tone="subdued">
-                  Configure thresholds and email notifications for inventory alerts
-                </Text>
-              </div>
+              <InlineStack gap="300" blockAlign="center">
+                <Icon source={AlertTriangleIcon} tone="base" />
+                <BlockStack gap="100">
+                  <Text as="h3" variant="headingMd" fontWeight="semibold">
+                    Spector Alert Settings
+                  </Text>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Configure thresholds, notifications, and storefront visibility controls
+                  </Text>
+                </BlockStack>
+              </InlineStack>
+              <Button
+                onClick={() => setShowAlertSettings(!showAlertSettings)}
+                variant="tertiary"
+                size="medium"
+                icon={showAlertSettings ? ChevronUpIcon : ChevronDownIcon}
+              >
+                {showAlertSettings ? 'Hide Settings' : 'Show Settings'}
+              </Button>
             </InlineStack>
             
-            {/* Controls Section */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr 1fr',
-              gap: '1.5rem',
-              padding: '1.25rem',
-              background: '#f8fafc',
-              borderRadius: '10px',
-              border: '1px solid #e2e8f0'
-            }}>
-              {/* Threshold Setting */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <Text as="span" variant="bodySm" tone="subdued" fontWeight="medium">
-                  Alert Threshold
-                </Text>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <div style={{ width: '120px' }}>
-                    <TextField
-                      label=""
-                      type="number"
-                      value={pendingThreshold.toString()}
-                      onChange={handleThresholdChange}
-                      autoComplete="off"
-                      min={1}
-                      max={100}
-                      suffix="units"
-                      placeholder="5"
-                    />
-                  </div>
-                  <button
-                    onClick={confirmThreshold}
-                    disabled={pendingThreshold === inventoryThreshold}
-                    className="reload-button"
-                    style={{
-                      background: pendingThreshold !== inventoryThreshold ? '#059669' : '#d1d5db',
-                      opacity: pendingThreshold !== inventoryThreshold ? 1 : 0.6,
-                      cursor: pendingThreshold !== inventoryThreshold ? 'pointer' : 'not-allowed',
-                    }}
-                  >
-                    Apply
-                  </button>
-                </div>
-                <Text as="p" variant="bodySm" tone="subdued">
-                  Products ≤{inventoryThreshold} units trigger alerts
-                </Text>
-              </div>
-              
-              {/* Out of Stock Email Alert */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <Text as="span" variant="bodySm" tone="subdued" fontWeight="medium">
-                  Out of Stock Notifications
-                </Text>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <div style={{
-                    background: '#fef2f2',
-                    color: '#dc2626',
-                    padding: '0.25rem 0.5rem',
-                    borderRadius: '4px',
-                    fontSize: '11px',
-                    fontWeight: '600',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px'
-                  }}>
-                    CRITICAL
-                  </div>
-                  <Text as="span" variant="bodySm" tone="subdued">
-                    Zero stock alerts
-                  </Text>
-                </div>
-                <Text as="p" variant="bodySm" tone="subdued">
-                  {oosEmailEnabled ? 'Will notify when products are out of stock' : 'Click to enable out of stock email alerts'}
-                </Text>
-                
-                {/* Toggle Switch for OOS */}
-                <div style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '0.5rem',
-                  marginTop: '0.5rem'
+            {/* Collapsible Settings Content */}
+            <Collapsible
+              open={showAlertSettings}
+              id="alert-settings-collapsible"
+              transition={{duration: '200ms', timingFunction: 'ease-in-out'}}
+            >
+              <BlockStack gap="400">
+                {/* Threshold Controls Section */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr 1fr',
+                  gap: '1.5rem',
+                  padding: '1.25rem',
+                  background: '#f8fafc',
+                  borderRadius: '10px',
+                  border: '1px solid #e2e8f0'
                 }}>
-                  <div
-                    style={{
-                      width: '44px',
-                      height: '24px',
-                      backgroundColor: oosEmailEnabled ? '#dc2626' : '#d1d5db',
-                      borderRadius: '12px',
-                      position: 'relative',
-                      cursor: 'pointer',
-                      transition: 'all 0.3s ease',
-                      border: oosEmailEnabled ? '2px solid #b91c1c' : '2px solid #9ca3af'
-                    }}
-                    onClick={() => handleOosToggle(!oosEmailEnabled)}
-                  >
-                    <div
-                      style={{
-                        width: '16px',
-                        height: '16px',
-                        backgroundColor: 'white',
-                        borderRadius: '50%',
-                        position: 'absolute',
-                        top: '2px',
-                        left: oosEmailEnabled ? '22px' : '2px',
-                        transition: 'all 0.3s ease',
-                        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)'
-                      }}
-                    />
+                  {/* Threshold Setting */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    <Text as="span" variant="bodySm" tone="subdued" fontWeight="medium">
+                      Alert Threshold
+                    </Text>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <div style={{ width: '120px' }}>
+                        <TextField
+                          label=""
+                          type="number"
+                          value={pendingThreshold.toString()}
+                          onChange={handleThresholdChange}
+                          autoComplete="off"
+                          min={1}
+                          max={100}
+                          suffix="units"
+                          placeholder="5"
+                        />
+                      </div>
+                      <button
+                        onClick={confirmThreshold}
+                        disabled={pendingThreshold === inventoryThreshold}
+                        className="reload-button"
+                        style={{
+                          background: pendingThreshold !== inventoryThreshold ? '#059669' : '#d1d5db',
+                          opacity: pendingThreshold !== inventoryThreshold ? 1 : 0.6,
+                          cursor: pendingThreshold !== inventoryThreshold ? 'pointer' : 'not-allowed',
+                        }}
+                      >
+                        Apply
+                      </button>
+                    </div>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Products ≤{inventoryThreshold} units trigger alerts
+                    </Text>
                   </div>
-                  <Text as="span" variant="bodySm" fontWeight="medium" tone={oosEmailEnabled ? 'critical' : 'subdued'}>
-                    {oosEmailEnabled ? 'Enabled' : 'Disabled'}
-                  </Text>
-                </div>
-              </div>
-              
-              {/* Critical Level Email Alert */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <Text as="span" variant="bodySm" tone="subdued" fontWeight="medium">
-                  Critical Level Notifications
-                </Text>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <div style={{
-                    background: '#fffbeb',
-                    color: '#d97706',
-                    padding: '0.25rem 0.5rem',
-                    borderRadius: '4px',
-                    fontSize: '11px',
-                    fontWeight: '600',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px'
-                  }}>
-                    WARNING
+                  
+                  {/* Out of Stock Email Alert */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    <Text as="span" variant="bodySm" tone="subdued" fontWeight="medium">
+                      Out of Stock Notifications
+                    </Text>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <div style={{
+                        background: '#fef2f2',
+                        color: '#dc2626',
+                        padding: '0.25rem 0.5rem',
+                        borderRadius: '4px',
+                        fontSize: '11px',
+                        fontWeight: '600',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.5px'
+                      }}>
+                        CRITICAL
+                      </div>
+                      <Text as="span" variant="bodySm" tone="subdued">
+                        Zero stock alerts
+                      </Text>
+                    </div>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      {oosEmailEnabled ? 'Will notify when products are out of stock' : 'Click to enable out of stock email alerts'}
+                    </Text>
+                    
+                    {/* Toggle Switch for OOS */}
+                    <div style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '0.5rem',
+                      marginTop: '0.5rem'
+                    }}>
+                      <div
+                        style={{
+                          width: '44px',
+                          height: '24px',
+                          backgroundColor: oosEmailEnabled ? '#dc2626' : '#d1d5db',
+                          borderRadius: '12px',
+                          position: 'relative',
+                          cursor: 'pointer',
+                          transition: 'all 0.3s ease',
+                          border: oosEmailEnabled ? '2px solid #b91c1c' : '2px solid #9ca3af'
+                        }}
+                        onClick={() => handleOosToggle(!oosEmailEnabled)}
+                      >
+                        <div
+                          style={{
+                            width: '16px',
+                            height: '16px',
+                            backgroundColor: 'white',
+                            borderRadius: '50%',
+                            position: 'absolute',
+                            top: '2px',
+                            left: oosEmailEnabled ? '22px' : '2px',
+                            transition: 'all 0.3s ease',
+                            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)'
+                          }}
+                        />
+                      </div>
+                      <Text as="span" variant="bodySm" fontWeight="medium" tone={oosEmailEnabled ? 'critical' : 'subdued'}>
+                        {oosEmailEnabled ? 'Enabled' : 'Disabled'}
+                      </Text>
+                    </div>
                   </div>
-                  <Text as="span" variant="bodySm" tone="subdued">
-                    ≤{Math.floor(inventoryThreshold / 2)} units
-                  </Text>
+                  
+                  {/* Critical Level Email Alert */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    <Text as="span" variant="bodySm" tone="subdued" fontWeight="medium">
+                      Critical Level Notifications
+                    </Text>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <div style={{
+                        background: '#fffbeb',
+                        color: '#d97706',
+                        padding: '0.25rem 0.5rem',
+                        borderRadius: '4px',
+                        fontSize: '11px',
+                        fontWeight: '600',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.5px'
+                      }}>
+                        WARNING
+                      </div>
+                      <Text as="span" variant="bodySm" tone="subdued">
+                        ≤{Math.floor(inventoryThreshold / 2)} units
+                      </Text>
+                    </div>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      {criticalEmailEnabled ? 'Will notify for critically low stock levels' : 'Click to enable critical level email alerts'}
+                    </Text>
+                    
+                    {/* Toggle Switch for Critical */}
+                    <div style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '0.5rem',
+                      marginTop: '0.5rem'
+                    }}>
+                      <div
+                        style={{
+                          width: '44px',
+                          height: '24px',
+                          backgroundColor: criticalEmailEnabled ? '#f59e0b' : '#d1d5db',
+                          borderRadius: '12px',
+                          position: 'relative',
+                          cursor: 'pointer',
+                          transition: 'all 0.3s ease',
+                          border: criticalEmailEnabled ? '2px solid #d97706' : '2px solid #9ca3af'
+                        }}
+                        onClick={() => handleCriticalToggle(!criticalEmailEnabled)}
+                      >
+                        <div
+                          style={{
+                            width: '16px',
+                            height: '16px',
+                            backgroundColor: 'white',
+                            borderRadius: '50%',
+                            position: 'absolute',
+                            top: '2px',
+                            left: criticalEmailEnabled ? '22px' : '2px',
+                            transition: 'all 0.3s ease',
+                            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)'
+                          }}
+                        />
+                      </div>
+                      <Text as="span" variant="bodySm" fontWeight="medium" tone={criticalEmailEnabled ? 'critical' : 'subdued'}>
+                        {criticalEmailEnabled ? 'Enabled' : 'Disabled'}
+                      </Text>
+                    </div>
+                  </div>
                 </div>
-                <Text as="p" variant="bodySm" tone="subdued">
-                  {criticalEmailEnabled ? 'Will notify for critically low stock levels' : 'Click to enable critical level email alerts'}
-                </Text>
-                
-                {/* Toggle Switch for Critical */}
-                <div style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '0.5rem',
-                  marginTop: '0.5rem'
+
+                {/* Management Settings Section */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: '1.5rem',
+                  padding: '1.5rem',
+                  background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)',
+                  borderRadius: '12px',
+                  border: '1px solid #e2e8f0'
                 }}>
-                  <div
-                    style={{
-                      width: '44px',
-                      height: '24px',
-                      backgroundColor: criticalEmailEnabled ? '#f59e0b' : '#d1d5db',
-                      borderRadius: '12px',
-                      position: 'relative',
-                      cursor: 'pointer',
-                      transition: 'all 0.3s ease',
-                      border: criticalEmailEnabled ? '2px solid #d97706' : '2px solid #9ca3af'
-                    }}
-                    onClick={() => handleCriticalToggle(!criticalEmailEnabled)}
-                  >
-                    <div
-                      style={{
-                        width: '16px',
-                        height: '16px',
-                        backgroundColor: 'white',
-                        borderRadius: '50%',
-                        position: 'absolute',
-                        top: '2px',
-                        left: criticalEmailEnabled ? '22px' : '2px',
-                        transition: 'all 0.3s ease',
-                        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)'
-                      }}
-                    />
+                  {/* Notification Settings */}
+                  <div style={{
+                    background: '#ffffff',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '8px',
+                    padding: '1.25rem'
+                  }}>
+                    <BlockStack gap="300">
+                      <InlineStack align="space-between" blockAlign="center">
+                        <Text as="h4" variant="headingSm" fontWeight="semibold">
+                          Notification Settings
+                        </Text>
+                        <InlineStack gap="200">
+                          {localNotificationSettings.email.enabled ? (
+                            <Badge tone="success">Active</Badge>
+                          ) : (
+                            <Badge tone="attention">Disabled</Badge>
+                          )}
+                        </InlineStack>
+                      </InlineStack>
+                      
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        {localNotificationSettings.email.enabled && localNotificationSettings.email.recipientEmail
+                          ? `Multi-channel alerts configured for comprehensive monitoring`
+                          : "Set up email alerts for low stock notifications"
+                        }
+                      </Text>
+                      
+                      <InlineStack gap="200">
+                        <Button 
+                          onClick={() => setShowNotificationSettings(true)}
+                          size="slim"
+                          variant="primary"
+                        >
+                          Configure
+                        </Button>
+                        
+                        {localNotificationSettings.email.enabled && localNotificationSettings.email.recipientEmail && (
+                          <Form method="post">
+                            <input type="hidden" name="actionType" value="testEmail" />
+                            <Button submit size="slim" variant="secondary">
+                              Test
+                            </Button>
+                          </Form>
+                        )}
+                      </InlineStack>
+                    </BlockStack>
                   </div>
-                  <Text as="span" variant="bodySm" fontWeight="medium" tone={criticalEmailEnabled ? 'critical' : 'subdued'}>
-                    {criticalEmailEnabled ? 'Enabled' : 'Disabled'}
-                  </Text>
+
+                  {/* Storefront Visibility */}
+                  <div style={{
+                    background: '#ffffff',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '8px',
+                    padding: '1.25rem'
+                  }}>
+                    <BlockStack gap="300">
+                      <InlineStack align="space-between" blockAlign="center">
+                        <Text as="h4" variant="headingSm" fontWeight="semibold">
+                          Storefront Visibility
+                        </Text>
+                        <InlineStack gap="200">
+                          {localVisibilitySettings.enabled ? (
+                            <Badge tone="success">Active</Badge>
+                          ) : (
+                            <Badge tone="attention">Disabled</Badge>
+                          )}
+                        </InlineStack>
+                      </InlineStack>
+                      
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        {localVisibilitySettings.enabled
+                          ? `Auto-${localVisibilitySettings.hideOutOfStock ? 'hiding' : 'managing'} out-of-stock products`
+                          : "Manage product visibility based on inventory levels"
+                        }
+                      </Text>
+                      
+                      <InlineStack gap="200">
+                        <Button 
+                          onClick={() => setShowVisibilitySettings(true)}
+                          size="slim"
+                          variant="primary"
+                        >
+                          Configure
+                        </Button>
+                        
+                        {localVisibilitySettings.enabled && zeroStockProducts.length > 0 && (
+                          <Form method="post">
+                            <input type="hidden" name="actionType" value="updateOutOfStockVisibility" />
+                            <Button submit size="slim" variant="secondary" tone="critical">
+                              Hide {zeroStockProducts.length} OOS
+                            </Button>
+                          </Form>
+                        )}
+
+                        {localVisibilitySettings.enabled && selectedProducts.size > 0 && (
+                          <Form method="post">
+                            <input type="hidden" name="actionType" value="hideSelectedProducts" />
+                            <input type="hidden" name="selectedProductIds" value={Array.from(selectedProducts).join(',')} />
+                            <Button submit size="slim" variant="secondary" tone="critical">
+                              Hide {selectedProducts.size.toString()} Selected
+                            </Button>
+                          </Form>
+                        )}
+
+                        {localVisibilitySettings.enabled && zeroStockProducts.length > 0 && (
+                          <Button 
+                            onClick={selectAllOOSProducts}
+                            size="slim" 
+                            variant="plain"
+                          >
+                            Select All OOS
+                          </Button>
+                        )}
+
+                        {selectedProducts.size > 0 && (
+                          <Button 
+                            onClick={clearSelection}
+                            size="slim" 
+                            variant="plain"
+                            tone="critical"
+                          >
+                            Clear Selection
+                          </Button>
+                        )}
+                      </InlineStack>
+                    </BlockStack>
+                  </div>
                 </div>
-              </div>
-            </div>
+              </BlockStack>
+            </Collapsible>
           </BlockStack>
         </div>
       </div>
@@ -1370,178 +1955,6 @@ export default function Index() {
         )} */}
 
         <Layout>
-          <Layout.Section variant="oneThird">
-            <BlockStack gap="400">
-              {/* Stats Card */}
-              <Card>
-                <BlockStack gap="300">
-                  <Text as="h3" variant="headingMd">
-                    Inventory Summary
-                  </Text>
-                  <BlockStack gap="300">
-                    {/* Out of Stock - Most Critical */}
-                    <div className="out-of-stock-banner">
-                      <InlineStack align="space-between" blockAlign="center">
-                        <InlineStack gap="200" blockAlign="center">
-                          <Text as="span" variant="bodyMd" fontWeight="semibold" tone="critical">
-                            Out of Stock
-                          </Text>
-                        </InlineStack>
-                        <Text variant="headingLg" as="span" fontWeight="bold" tone="critical">
-                          {zeroStockProducts.length}
-                        </Text>
-                      </InlineStack>
-                    </div>
-                    
-                    {/* Low Stock - Secondary Priority */}
-                    <InlineStack align="space-between" blockAlign="center">
-                      <Text as="span" variant="bodyMd">Low Stock:</Text>
-                      <Badge tone="warning" size="large">{lowStockProducts.length}</Badge>
-                    </InlineStack>
-                    
-                    {/* Healthy Stock */}
-                    <InlineStack align="space-between" blockAlign="center">
-                      <Text as="span" variant="bodyMd">Healthy Stock:</Text>
-                      <Badge tone="success" size="large">
-                        {(products.length - lowStockProducts.length - zeroStockProducts.length).toString()}
-                      </Badge>
-                    </InlineStack>
-                    
-                    {/* Total Products - Last */}
-                    <InlineStack align="space-between" blockAlign="center">
-                      <Text as="span" variant="bodyMd">Total Products:</Text>
-                      <Badge tone="info" size="large">{products.length}</Badge>
-                    </InlineStack>
-                  </BlockStack>
-                </BlockStack>
-              </Card>
-
-              {/* Notification Settings Card */}
-              <Card>
-                <BlockStack gap="300">
-                  <InlineStack align="space-between" blockAlign="center">
-                    <Text as="h3" variant="headingMd">
-                      Notification Settings
-                    </Text>
-                    <InlineStack gap="200">
-                      {notificationSettings.email.enabled && (
-                        <Badge tone="success">Email</Badge>
-                      )}
-                      {notificationSettings.slack.enabled && (
-                        <Badge tone="info">Slack</Badge>
-                      )}
-                      {notificationSettings.discord.enabled && (
-                        <Badge tone="magic">Discord</Badge>
-                      )}
-                      {!notificationSettings.email.enabled && !notificationSettings.slack.enabled && !notificationSettings.discord.enabled && (
-                        <Badge tone="attention">Disabled</Badge>
-                      )}
-                    </InlineStack>
-                  </InlineStack>
-                  
-                  <BlockStack gap="200">
-                    <Text as="p" variant="bodyMd" tone="subdued">
-                      {notificationSettings.email.enabled || notificationSettings.slack.enabled || notificationSettings.discord.enabled
-                        ? `Configure multiple notification channels for comprehensive low stock alerts`
-                        : "No notification channels configured"
-                      }
-                    </Text>
-                    
-                    <InlineStack gap="200">
-                      <Button 
-                        onClick={() => setShowNotificationSettings(true)}
-                        size="slim"
-                      >
-                        Configure Notifications
-                      </Button>
-                      
-                      {(lowStockProducts.length > 0 || zeroStockProducts.length > 0) && 
-                       (notificationSettings.email.enabled || notificationSettings.slack.enabled || notificationSettings.discord.enabled) && (
-                        <Form method="post">
-                          <input type="hidden" name="actionType" value="sendAlert" />
-                          <input type="hidden" name="products" value={JSON.stringify(products)} />
-                          <input type="hidden" name="threshold" value={inventoryThreshold.toString()} />
-                          <input type="hidden" name="emailEnabled" value={notificationSettings.email.enabled.toString()} />
-                          <input type="hidden" name="recipientEmail" value={notificationSettings.email.recipientEmail} />
-                          <input type="hidden" name="slackEnabled" value={notificationSettings.slack.enabled.toString()} />
-                          <input type="hidden" name="slackWebhook" value={notificationSettings.slack.webhookUrl} />
-                          <input type="hidden" name="slackChannel" value={notificationSettings.slack.channel} />
-                          <input type="hidden" name="discordEnabled" value={notificationSettings.discord.enabled.toString()} />
-                          <input type="hidden" name="discordWebhook" value={notificationSettings.discord.webhookUrl} />
-                          <input type="hidden" name="discordUsername" value={notificationSettings.discord.username} />
-                          <Button 
-                            submit 
-                            variant="primary" 
-                            size="slim"
-                            tone="critical"
-                          >
-                            Send Alert Now
-                          </Button>
-                        </Form>
-                      )}
-                    </InlineStack>
-                  </BlockStack>
-                </BlockStack>
-              </Card>
-
-              {/* Storefront Visibility Management Card */}
-              <Card>
-                <BlockStack gap="300">
-                  <InlineStack align="space-between" blockAlign="center">
-                    <Text as="h3" variant="headingMd">
-                      Storefront Visibility
-                    </Text>
-                    <InlineStack gap="200">
-                      {localVisibilitySettings.enabled ? (
-                        <Badge tone="success">Active</Badge>
-                      ) : (
-                        <Badge tone="attention">Disabled</Badge>
-                      )}
-                    </InlineStack>
-                  </InlineStack>
-                  
-                  <BlockStack gap="200">
-                    <Text as="p" variant="bodyMd" tone="subdued">
-                      {localVisibilitySettings.enabled
-                        ? `Automatically ${localVisibilitySettings.hideOutOfStock ? 'hide' : 'keep'} out-of-stock products on your storefront`
-                        : "Manage product visibility on your storefront based on inventory levels"
-                      }
-                    </Text>
-                    
-                    <InlineStack gap="200">
-                      <Button 
-                        onClick={() => setShowVisibilitySettings(true)}
-                        size="slim"
-                      >
-                        Configure Visibility
-                      </Button>
-                      
-                      {localVisibilitySettings.enabled && (
-                        <InlineStack gap="100">
-                          <Form method="post">
-                            <input type="hidden" name="actionType" value="syncProductVisibility" />
-                            <Button submit size="slim" variant="secondary">
-                              Sync All Products
-                            </Button>
-                          </Form>
-                          
-                          {zeroStockProducts.length > 0 && (
-                            <Form method="post">
-                              <input type="hidden" name="actionType" value="updateOutOfStockVisibility" />
-                              <Button submit size="slim" tone="critical">
-                                Hide {zeroStockProducts.length} Out-of-Stock
-                              </Button>
-                            </Form>
-                          )}
-                        </InlineStack>
-                      )}
-                    </InlineStack>
-                  </BlockStack>
-                </BlockStack>
-              </Card>
-            </BlockStack>
-          </Layout.Section>
-          
           <Layout.Section>
             <BlockStack gap="400">
               {/* Out of Stock Products */}
@@ -1582,130 +1995,197 @@ export default function Index() {
                       }
                     />
                   ) : (
-                    <BlockStack gap="200">
+                    <BlockStack gap="300">
                       <Text as="p" variant="bodyMd" tone="subdued">
                         Products that are completely out of stock and need immediate restocking
                       </Text>
-                      <BlockStack gap="100">
-                        {zeroStockProducts.map((product: Product) => (
-                          <div key={product.id} className="product-card-hover" style={{ 
-                            background: '#f1f5f9',
-                            border: '1px solid #e2e8f0',
-                            borderRadius: '8px',
-                            padding: '1rem'
-                          }}>
-                            <InlineStack gap="400" blockAlign="center">
-                              {/* Product Image */}
-                              <div 
-                                style={{
-                                  width: '60px',
-                                  height: '60px',
-                                  borderRadius: '8px',
+                      
+                      {/* Compact Grid Layout with Scroll */}
+                      <div style={{ 
+                        maxHeight: '280px',
+                        overflowY: 'auto',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '8px',
+                        padding: '1rem',
+                        background: 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)'
+                      }}>
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                          gap: '0.75rem'
+                        }}>
+                          {zeroStockProducts.map((product: Product) => (
+                            <div key={product.id} className="product-card-hover" style={{ 
+                              background: '#ffffff',
+                              border: '1px solid #fecaca',
+                              borderRadius: '8px',
+                              padding: '0.75rem',
+                              transition: 'all 0.2s ease',
+                              cursor: 'pointer'
+                            }}
+                            onClick={() => handleProductClick(product.id)}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.borderColor = '#dc2626';
+                              e.currentTarget.style.boxShadow = '0 2px 8px rgba(220, 38, 38, 0.2)';
+                              e.currentTarget.style.transform = 'translateY(-1px)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.borderColor = '#fecaca';
+                              e.currentTarget.style.boxShadow = 'none';
+                              e.currentTarget.style.transform = 'translateY(0)';
+                            }}>
+                              <InlineStack gap="300" blockAlign="center">
+                                {/* Selection Checkbox */}
+                                <div 
+                                  onClick={(e) => e.stopPropagation()}
+                                  style={{ flexShrink: 0 }}
+                                >
+                                  <Checkbox 
+                                    checked={selectedProducts.has(product.id)}
+                                    onChange={() => toggleProductSelection(product.id)}
+                                    label=""
+                                  />
+                                </div>
+                                
+                                {/* Compact Product Image */}
+                                <div style={{
+                                  width: '40px',
+                                  height: '40px',
+                                  borderRadius: '6px',
                                   overflow: 'hidden',
-                                  backgroundColor: '#f1f5f9',
+                                  backgroundColor: '#fef2f2',
                                   display: 'flex',
                                   alignItems: 'center',
                                   justifyContent: 'center',
-                                  cursor: 'pointer',
-                                  border: '2px solid #e2e8f0',
-                                  transition: 'all 0.2s ease'
-                                }}
-                                onClick={() => handleProductClick(product.id)}
-                                onMouseEnter={(e) => {
-                                  e.currentTarget.style.borderColor = '#3b82f6';
-                                  e.currentTarget.style.transform = 'scale(1.05)';
-                                }}
-                                onMouseLeave={(e) => {
-                                  e.currentTarget.style.borderColor = '#e2e8f0';
-                                  e.currentTarget.style.transform = 'scale(1)';
-                                }}
-                              >
-                                {product.image ? (
-                                  <img
-                                    src={product.image}
-                                    alt={product.imageAlt}
-                                    style={{
-                                      width: '100%',
-                                      height: '100%',
-                                      objectFit: 'cover',
-                                      opacity: 0,
-                                      transition: 'opacity 0.3s ease-in-out'
-                                    }}
-                                    onLoad={(e) => {
-                                      e.currentTarget.style.opacity = '1';
-                                    }}
-                                    onError={(e) => {
-                                      e.currentTarget.style.display = 'none';
-                                    }}
-                                  />
-                                ) : (
-                                  <Icon source={InventoryIcon} tone="subdued" />
-                                )}
-                              </div>
-                              
-                              {/* Product Info */}
-                              <div style={{ flex: 1 }}>
-                                <InlineStack align="space-between" blockAlign="center">
+                                  border: '2px solid #fecaca',
+                                  flexShrink: 0
+                                }}>
+                                  {product.image ? (
+                                    <img
+                                      src={product.image}
+                                      alt={product.imageAlt}
+                                      style={{
+                                        width: '100%',
+                                        height: '100%',
+                                        objectFit: 'cover',
+                                        opacity: 0,
+                                        transition: 'opacity 0.3s ease-in-out'
+                                      }}
+                                      onLoad={(e) => {
+                                        e.currentTarget.style.opacity = '1';
+                                      }}
+                                      onError={(e) => {
+                                        e.currentTarget.style.display = 'none';
+                                      }}
+                                    />
+                                  ) : (
+                                    <Icon source={InventoryIcon} tone="critical" />
+                                  )}
+                                </div>
+                                
+                                {/* Compact Product Info */}
+                                <div style={{ flex: 1, minWidth: 0 }}>
                                   <BlockStack gap="100">
-                                    <button
-                                      onClick={() => handleProductClick(product.id)}
-                                      style={{
-                                        background: 'none',
-                                        border: 'none',
-                                        padding: 0,
-                                        cursor: 'pointer',
-                                        textAlign: 'left',
-                                        color: '#1f2937',
-                                        fontSize: '16px',
-                                        fontWeight: '500',
-                                        textDecoration: 'none',
-                                        transition: 'color 0.2s ease'
-                                      }}
-                                      onMouseEnter={(e) => {
-                                        e.currentTarget.style.color = '#3b82f6';
-                                        e.currentTarget.style.textDecoration = 'underline';
-                                      }}
-                                      onMouseLeave={(e) => {
-                                        e.currentTarget.style.color = '#1f2937';
-                                        e.currentTarget.style.textDecoration = 'none';
-                                      }}
-                                    >
-                                      {product.name}
-                                    </button>
-                                    <Text as="p" variant="bodySm" tone="subdued">
-                                      Click to manage in Shopify Admin
-                                    </Text>
-                                  </BlockStack>
-                                  
-                                  <InlineStack gap="200" align="end">
-                                    <InlineStack gap="100" blockAlign="center">
-                                      <Text variant="headingMd" as="span" fontWeight="bold" tone="critical">
-                                        0
+                                    <div style={{ 
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap'
+                                    }}>
+                                      <Text as="p" variant="bodyMd" fontWeight="medium">
+                                        {product.name}
                                       </Text>
-                                      <Text variant="bodySm" tone="subdued" as="span">
-                                        units
-                                      </Text>
+                                    </div>
+                                    <InlineStack gap="200" align="space-between">
+                                      <InlineStack gap="100" blockAlign="center">
+                                        <Badge tone="critical" size="small">
+                                          0 units
+                                        </Badge>
+                                        {/* Product Visibility Status */}
+                                        {product.status === 'ACTIVE' && product.handle ? (
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              if (product.handle) {
+                                                window.open(getProductStoreUrl(shopInfo.myshopifyDomain, product.handle), '_blank');
+                                              }
+                                            }}
+                                            style={{
+                                              background: 'none',
+                                              border: 'none',
+                                              cursor: 'pointer',
+                                              padding: '2px',
+                                              borderRadius: '2px',
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              color: '#10b981'
+                                            }}
+                                            title="View live product in store"
+                                          >
+                                            <Icon source={ViewIcon} tone="success" />
+                                          </button>
+                                        ) : (
+                                          <div
+                                            style={{
+                                              padding: '2px',
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              color: '#ef4444'
+                                            }}
+                                            title="Product is drafted/hidden from store"
+                                          >
+                                            <Icon source={HideIcon} tone="critical" />
+                                          </div>
+                                        )}
+                                      </InlineStack>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleProductClick(product.id);
+                                        }}
+                                        style={{
+                                          background: '#dc2626',
+                                          color: 'white',
+                                          border: 'none',
+                                          borderRadius: '4px',
+                                          padding: '0.25rem 0.5rem',
+                                          fontSize: '12px',
+                                          fontWeight: '500',
+                                          cursor: 'pointer',
+                                          transition: 'background 0.2s ease'
+                                        }}
+                                        onMouseEnter={(e) => {
+                                          e.currentTarget.style.background = '#b91c1c';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                          e.currentTarget.style.background = '#dc2626';
+                                        }}
+                                      >
+                                        Manage
+                                      </button>
                                     </InlineStack>
-                                    <Badge tone="critical" size="small">
-                                      Out of stock
-                                    </Badge>
-                                    <button
-                                      onClick={() => handleProductClick(product.id)}
-                                      className="reload-button"
-                                      style={{
-                                        background: '#dc2626',
-                                        color: 'white'
-                                      }}
-                                    >
-                                      Manage
-                                    </button>
-                                  </InlineStack>
-                                </InlineStack>
-                              </div>
-                            </InlineStack>
+                                  </BlockStack>
+                                </div>
+                              </InlineStack>
+                            </div>
+                          ))}
+                        </div>
+                        
+                        {/* Show count at bottom if there are many items */}
+                        {zeroStockProducts.length > 6 && (
+                          <div style={{
+                            textAlign: 'center',
+                            marginTop: '1rem',
+                            padding: '0.5rem',
+                            background: 'rgba(255, 255, 255, 0.8)',
+                            borderRadius: '6px',
+                            border: '1px solid #fecaca'
+                          }}>
+                            <Text as="p" variant="bodySm" tone="subdued">
+                              Showing {zeroStockProducts.length} out of stock products
+                            </Text>
                           </div>
-                        ))}
-                      </BlockStack>
+                        )}
+                      </div>
                     </BlockStack>
                   )}
                 </BlockStack>
@@ -1968,19 +2448,41 @@ export default function Index() {
                                   <BlockStack gap="200">
                                     <InlineStack align="space-between" blockAlign="start">
                                       <InlineStack gap="300" blockAlign="start">
+                                        {/* Selection Checkbox */}
+                                        <div style={{ flexShrink: 0, paddingTop: '0.5rem' }}>
+                                          <Checkbox 
+                                            checked={selectedProducts.has(product.id)}
+                                            onChange={() => toggleProductSelection(product.id)}
+                                            label=""
+                                          />
+                                        </div>
+                                        
                                         {/* Product Image */}
                                         <div style={{
                                           width: '60px',
                                           height: '60px',
                                           borderRadius: '8px',
                                           overflow: 'hidden',
-                                          border: '1px solid #e5e7eb',
+                                          border: '2px solid #e2e8f0',
                                           backgroundColor: '#f9fafb',
                                           display: 'flex',
                                           alignItems: 'center',
                                           justifyContent: 'center',
                                           fontSize: '10px',
-                                          textAlign: 'center'
+                                          textAlign: 'center',
+                                          cursor: 'pointer',
+                                          transition: 'all 0.2s ease'
+                                        }}
+                                        onClick={() => handleProductClick(product.id)}
+                                        onMouseEnter={(e) => {
+                                          e.currentTarget.style.borderColor = isCritical ? '#dc2626' : '#d97706';
+                                          e.currentTarget.style.transform = 'scale(1.05)';
+                                          e.currentTarget.style.boxShadow = `0 4px 12px ${isCritical ? 'rgba(220, 38, 38, 0.3)' : 'rgba(217, 119, 6, 0.3)'}`;
+                                        }}
+                                        onMouseLeave={(e) => {
+                                          e.currentTarget.style.borderColor = '#e2e8f0';
+                                          e.currentTarget.style.transform = 'scale(1)';
+                                          e.currentTarget.style.boxShadow = 'none';
                                         }}>
                                           {product.image ? (
                                             <>
@@ -1990,7 +2492,12 @@ export default function Index() {
                                                 style={{
                                                   width: '100%',
                                                   height: '100%',
-                                                  objectFit: 'cover'
+                                                  objectFit: 'cover',
+                                                  opacity: 0,
+                                                  transition: 'opacity 0.3s ease-in-out'
+                                                }}
+                                                onLoad={(e) => {
+                                                  e.currentTarget.style.opacity = '1';
                                                 }}
                                                 onError={(e) => {
                                                   e.currentTarget.style.display = 'none';
@@ -2008,11 +2515,13 @@ export default function Index() {
                                                   justifyContent: 'center',
                                                   width: '100%',
                                                   height: '100%',
-                                                  flexDirection: 'column'
+                                                  flexDirection: 'column',
+                                                  backgroundColor: '#f3f4f6',
+                                                  color: '#6b7280'
                                                 }}
                                               >
                                                 <Icon source={InventoryIcon} tone="subdued" />
-                                                <div style={{ fontSize: '8px', marginTop: '4px' }}>No Image</div>
+                                                <div style={{ fontSize: '8px', marginTop: '2px' }}>Failed</div>
                                               </div>
                                             </>
                                           ) : (
@@ -2022,19 +2531,43 @@ export default function Index() {
                                               justifyContent: 'center',
                                               flexDirection: 'column',
                                               width: '100%',
-                                              height: '100%'
+                                              height: '100%',
+                                              backgroundColor: '#f3f4f6',
+                                              color: '#6b7280'
                                             }}>
                                               <Icon source={InventoryIcon} tone="subdued" />
-                                              <div style={{ fontSize: '8px', marginTop: '4px' }}>No Image</div>
+                                              <div style={{ fontSize: '8px', marginTop: '2px' }}>No Image</div>
                                             </div>
                                           )}
                                         </div>
                                         
                                         {/* Product Info */}
                                         <BlockStack gap="100">
-                                          <Text as="h4" variant="headingSm" fontWeight="medium">
+                                          <button
+                                            onClick={() => handleProductClick(product.id)}
+                                            style={{
+                                              background: 'none',
+                                              border: 'none',
+                                              padding: 0,
+                                              cursor: 'pointer',
+                                              textAlign: 'left',
+                                              color: '#1f2937',
+                                              fontSize: '16px',
+                                              fontWeight: '500',
+                                              textDecoration: 'none',
+                                              transition: 'color 0.2s ease'
+                                            }}
+                                            onMouseEnter={(e) => {
+                                              e.currentTarget.style.color = isCritical ? '#dc2626' : '#d97706';
+                                              e.currentTarget.style.textDecoration = 'underline';
+                                            }}
+                                            onMouseLeave={(e) => {
+                                              e.currentTarget.style.color = '#1f2937';
+                                              e.currentTarget.style.textDecoration = 'none';
+                                            }}
+                                          >
                                             {product.name}
-                                          </Text>
+                                          </button>
                                           <InlineStack gap="300">
                                             <Text as="span" variant="bodySm" tone="subdued">
                                               Current Stock: {product.stock} units
@@ -2138,25 +2671,43 @@ export default function Index() {
                 >
                   <BlockStack gap="400">
                     <Text as="p" variant="bodyMd" tone="subdued">
-                      Track how long products have been in your store and get AI-powered suggestions for clearance sales, bundles, and promotions.
+                      Track how long products have been in your store and get personalized AI-powered suggestions with recommended Shopify apps and upsell strategies.
                     </Text>
                     
                     {/* Product Tracker Stats */}
                     <InlineStack gap="200">
                       <Badge tone="critical">
-                        {`${productTrackerData.filter((p: any) => getStaleStatus(getDaysInStore(p.createdAt), getDaysSinceLastSale(p.lastSoldDate)) === 'critical').length} Critical`}
+                        {`${productTrackerData.filter((p: any) => getStaleStatus(getDaysInStore(p.createdAt), getDaysSinceLastSale(p.lastSoldDate)) === 'critical').length} Stale`}
                       </Badge>
                       <Badge tone="warning">
-                        {`${productTrackerData.filter((p: any) => getStaleStatus(getDaysInStore(p.createdAt), getDaysSinceLastSale(p.lastSoldDate)) === 'warning').length} Warning`}
+                        {`${productTrackerData.filter((p: any) => getStaleStatus(getDaysInStore(p.createdAt), getDaysSinceLastSale(p.lastSoldDate)) === 'warning').length} Aging`}
                       </Badge>
                       <Badge tone="attention">
-                        {`${productTrackerData.filter((p: any) => getStaleStatus(getDaysInStore(p.createdAt), getDaysSinceLastSale(p.lastSoldDate)) === 'attention').length} Attention`}
+                        {`${productTrackerData.filter((p: any) => getStaleStatus(getDaysInStore(p.createdAt), getDaysSinceLastSale(p.lastSoldDate)) === 'attention').length} Watch`}
+                      </Badge>
+                      <Badge tone="success">
+                        {`${productTrackerData.filter((p: any) => getStaleStatus(getDaysInStore(p.createdAt), getDaysSinceLastSale(p.lastSoldDate)) === 'fresh').length} Fresh`}
                       </Badge>
                     </InlineStack>
                     
                     {/* Product List */}
                     <BlockStack gap="200">
-                      {productTrackerData.map((product: any) => {
+                      {productTrackerData
+                        .sort((a: any, b: any) => {
+                          // Define priority order for sorting (Stale → Aging → Watch → Fresh)
+                          const priorityOrder: Record<string, number> = { 
+                            'critical': 1, 
+                            'warning': 2, 
+                            'attention': 3, 
+                            'fresh': 4 
+                          };
+                          
+                          const statusA = getStaleStatus(getDaysInStore(a.createdAt), getDaysSinceLastSale(a.lastSoldDate));
+                          const statusB = getStaleStatus(getDaysInStore(b.createdAt), getDaysSinceLastSale(b.lastSoldDate));
+                          
+                          return priorityOrder[statusA] - priorityOrder[statusB];
+                        })
+                        .map((product: any) => {
                         const daysInStore = getDaysInStore(product.createdAt);
                         const daysSinceLastSale = getDaysSinceLastSale(product.lastSoldDate);
                         const status = getStaleStatus(daysInStore, daysSinceLastSale);
@@ -2177,11 +2728,32 @@ export default function Index() {
                                     height: '50px',
                                     borderRadius: '6px',
                                     overflow: 'hidden',
-                                    border: '1px solid #e5e7eb',
+                                    border: '2px solid #e2e8f0',
                                     backgroundColor: '#f9fafb',
                                     display: 'flex',
                                     alignItems: 'center',
-                                    justifyContent: 'center'
+                                    justifyContent: 'center',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s ease'
+                                  }}
+                                  onClick={() => handleProductClick(product.id)}
+                                  onMouseEnter={(e) => {
+                                    const hoverColor = 
+                                      status === 'critical' ? '#dc2626' : 
+                                      status === 'warning' ? '#d97706' : 
+                                      status === 'attention' ? '#f59e0b' : '#10b981';
+                                    const shadowColor = 
+                                      status === 'critical' ? 'rgba(220, 38, 38, 0.3)' : 
+                                      status === 'warning' ? 'rgba(217, 119, 6, 0.3)' : 
+                                      status === 'attention' ? 'rgba(245, 158, 11, 0.3)' : 'rgba(16, 185, 129, 0.3)';
+                                    e.currentTarget.style.borderColor = hoverColor;
+                                    e.currentTarget.style.transform = 'scale(1.05)';
+                                    e.currentTarget.style.boxShadow = `0 4px 12px ${shadowColor}`;
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.borderColor = '#e2e8f0';
+                                    e.currentTarget.style.transform = 'scale(1)';
+                                    e.currentTarget.style.boxShadow = 'none';
                                   }}>
                                     {product.image ? (
                                       <>
@@ -2191,7 +2763,12 @@ export default function Index() {
                                           style={{
                                             width: '100%',
                                             height: '100%',
-                                            objectFit: 'cover'
+                                            objectFit: 'cover',
+                                            opacity: 0,
+                                            transition: 'opacity 0.3s ease-in-out'
+                                          }}
+                                          onLoad={(e) => {
+                                            e.currentTarget.style.opacity = '1';
                                           }}
                                           onError={(e) => {
                                             e.currentTarget.style.display = 'none';
@@ -2221,9 +2798,35 @@ export default function Index() {
                                   
                                   {/* Product Info */}
                                   <BlockStack gap="100">
-                                    <Text as="h4" variant="headingSm" fontWeight="medium">
+                                    <button
+                                      onClick={() => handleProductClick(product.id)}
+                                      style={{
+                                        background: 'none',
+                                        border: 'none',
+                                        padding: 0,
+                                        cursor: 'pointer',
+                                        textAlign: 'left',
+                                        color: '#1f2937',
+                                        fontSize: '14px',
+                                        fontWeight: '500',
+                                        textDecoration: 'none',
+                                        transition: 'color 0.2s ease'
+                                      }}
+                                      onMouseEnter={(e) => {
+                                        const hoverColor = 
+                                          status === 'critical' ? '#dc2626' : 
+                                          status === 'warning' ? '#d97706' : 
+                                          status === 'attention' ? '#f59e0b' : '#10b981';
+                                        e.currentTarget.style.color = hoverColor;
+                                        e.currentTarget.style.textDecoration = 'underline';
+                                      }}
+                                      onMouseLeave={(e) => {
+                                        e.currentTarget.style.color = '#1f2937';
+                                        e.currentTarget.style.textDecoration = 'none';
+                                      }}
+                                    >
                                       {product.name}
-                                    </Text>
+                                    </button>
                                     <InlineStack gap="300">
                                       <Text as="span" variant="bodySm" tone="subdued">
                                         ${product.price}
@@ -2409,7 +3012,7 @@ export default function Index() {
                       value={localNotificationSettings.email.recipientEmail}
                       onChange={(value) => handleNotificationSettingChange('email', 'recipientEmail', value)}
                       placeholder="alerts@yourcompany.com"
-                      helpText="Email address where low stock alerts will be sent"
+                      helpText="Email address where stock alerts will be sent"
                       autoComplete="email"
                     />
 
@@ -2632,7 +3235,7 @@ export default function Index() {
         <Modal
           open={showSuggestionModal}
           onClose={() => setShowSuggestionModal(false)}
-          title={`AI Suggestions for ${selectedProduct.name}`}
+          title={`AI Suggestions for ${selectedProduct.title || selectedProduct.name || 'Product'}`}
           primaryAction={{
             content: 'Close',
             onAction: () => setShowSuggestionModal(false),
@@ -2641,7 +3244,7 @@ export default function Index() {
           <Modal.Section>
             <BlockStack gap="400">
               <Text as="p" variant="bodyMd">
-                Based on this product's performance, here are AI-powered suggestions to improve sales:
+                Based on this product's performance and category, here are personalized AI-powered suggestions with recommended Shopify apps and upsell opportunities:
               </Text>
               
               {generateAISuggestions(selectedProduct).map((suggestion, index) => (
@@ -2651,25 +3254,64 @@ export default function Index() {
                   borderRadius: '8px',
                   padding: '1rem'
                 }}>
-                  <BlockStack gap="200">
-                    <InlineStack gap="200" blockAlign="center">
-                      <Icon 
-                        source={suggestion.type === 'clearance' ? AlertTriangleIcon : 
-                               suggestion.type === 'bundle' ? GiftCardIcon : 
-                               suggestion.type === 'promotion' ? CalendarIcon : 
-                               InventoryIcon} 
-                        tone="subdued" 
-                      />
-                      <Text as="h4" variant="headingSm" fontWeight="medium">
-                        {suggestion.title}
-                      </Text>
-                    </InlineStack>
+                  <BlockStack gap="300">
+                    <Text as="h4" variant="headingSm" fontWeight="medium">
+                      {suggestion.title}
+                    </Text>
+                    
                     <Text as="p" variant="bodyMd">
                       {suggestion.description}
                     </Text>
-                    <Text as="p" variant="bodySm" fontWeight="medium">
-                      Recommended Action: {suggestion.action}
-                    </Text>
+                    
+                    <div style={{ 
+                      background: '#f0f9ff',
+                      border: '1px solid #bae6fd',
+                      borderRadius: '6px',
+                      padding: '0.75rem'
+                    }}>
+                      <Text as="p" variant="bodySm" fontWeight="medium" tone="subdued">
+                        💡 Recommended Action:
+                      </Text>
+                      <Text as="p" variant="bodySm" fontWeight="medium">
+                        {suggestion.action}
+                      </Text>
+                    </div>
+
+                    {suggestion.apps && suggestion.apps.length > 0 && (
+                      <div style={{ 
+                        background: '#fefdf8',
+                        border: '1px solid #fde68a',
+                        borderRadius: '6px',
+                        padding: '0.75rem'
+                      }}>
+                        <Text as="p" variant="bodySm" fontWeight="medium" tone="subdued">
+                          🛍️ Recommended Shopify Apps:
+                        </Text>
+                        <div style={{ marginTop: '0.5rem', display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+                          {suggestion.apps.map((app, appIndex) => (
+                            <Badge key={appIndex} tone="info" size="small">
+                              {app}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {suggestion.upsell && (
+                      <div style={{ 
+                        background: '#f0fdf4',
+                        border: '1px solid #bbf7d0',
+                        borderRadius: '6px',
+                        padding: '0.75rem'
+                      }}>
+                        <Text as="p" variant="bodySm" fontWeight="medium" tone="subdued">
+                          💰 Upsell Opportunity:
+                        </Text>
+                        <Text as="p" variant="bodySm">
+                          {suggestion.upsell}
+                        </Text>
+                      </div>
+                    )}
                   </BlockStack>
                 </div>
               ))}
@@ -2683,13 +3325,860 @@ export default function Index() {
                 <InlineStack gap="200" blockAlign="center">
                   <Icon source={InventoryIcon} tone="subdued" />
                   <Text as="p" variant="bodySm">
-                    Product Details: {getDaysInStore(selectedProduct.createdAt)} days in store • 
-                    {getDaysSinceLastSale(selectedProduct.lastSoldDate)} days since last sale • 
-                    Current price: ${selectedProduct.price}
+                    Product Details: {selectedProduct.createdAt ? getDaysInStore(selectedProduct.createdAt) : 0} days in store • 
+                    {selectedProduct.lastSoldDate ? getDaysSinceLastSale(selectedProduct.lastSoldDate) : 0} days since last sale • 
+                    Current price: ${Number(selectedProduct.price || 0).toFixed(2)} • 
+                    Category: {selectedProduct.category || 'Unknown'}
                   </Text>
                 </InlineStack>
               </div>
             </BlockStack>
+          </Modal.Section>
+        </Modal>
+      )}
+
+      {/* Data Analysis Modal */}
+      {isDataAnalysisModalOpen && selectedProduct && (
+        <Modal
+          open={isDataAnalysisModalOpen}
+          onClose={() => {
+            setIsDataAnalysisModalOpen(false);
+            setAnalysisData(null);
+          }}
+          title={`Market Intelligence Report: ${selectedProduct.title || selectedProduct.name || 'Product'}`}
+          primaryAction={{
+            content: 'Close Analysis',
+            onAction: () => {
+              setIsDataAnalysisModalOpen(false);
+              setAnalysisData(null);
+            }
+          }}
+        >
+          <Modal.Section>
+            {isLoadingAnalysis ? (
+              <div style={{ textAlign: 'center', padding: '2rem' }}>
+                <Spinner accessibilityLabel="Loading analysis data" size="large" />
+                <div style={{ marginTop: '1rem' }}>
+                  <Text as="p" variant="bodyMd">
+                    Analyzing market data from multiple sources...
+                  </Text>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Fetching competitor pricing, market trends, and strategic insights
+                  </Text>
+                </div>
+              </div>
+            ) : analysisData && !analysisData.error ? (
+              <BlockStack gap="500">
+                {/* Unified Market Intelligence Section */}
+                <div style={{
+                  background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
+                  border: '2px solid #e2e8f0',
+                  borderRadius: '20px',
+                  padding: '2.5rem',
+                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.08)',
+                  position: 'relative',
+                  overflow: 'hidden'
+                }}>
+                  {/* Background Pattern */}
+                  <div style={{
+                    position: 'absolute',
+                    top: 0,
+                    right: 0,
+                    width: '200px',
+                    height: '200px',
+                    background: 'radial-gradient(circle, rgba(59, 130, 246, 0.05) 0%, transparent 70%)',
+                    borderRadius: '50%',
+                    transform: 'translate(50%, -50%)'
+                  }} />
+                  
+                  <BlockStack gap="600">
+                    {/* Header Section */}
+                    <div style={{ position: 'relative', zIndex: 1 }}>
+                      <div style={{ marginBottom: '2rem' }}>
+                        <InlineStack align="space-between" blockAlign="center">
+                          <div>
+                            <Text as="h2" variant="headingXl" fontWeight="bold">
+                              Market Intelligence Analysis
+                            </Text>
+                            <Text as="p" variant="bodyLg" tone="subdued">
+                              Comprehensive competitive analysis and strategic market insights
+                            </Text>
+                          </div>
+                        <div style={{
+                          background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                          color: 'white',
+                          padding: '1rem 2rem',
+                          borderRadius: '16px',
+                          textAlign: 'center',
+                          minWidth: '150px',
+                          boxShadow: '0 4px 16px rgba(16, 185, 129, 0.3)'
+                        }}>
+                          <Text as="p" variant="bodyMd" fontWeight="bold" tone="inherit">
+                            {analysisData?.marketInsights?.confidence || 0}% Confidence
+                          </Text>
+                          <Text as="p" variant="bodySm" tone="inherit">
+                            {(analysisData?.marketInsights?.sampleSize || 0).toLocaleString()}+ data points
+                          </Text>
+                        </div>
+                        </InlineStack>
+                      </div>
+                      
+                      {/* Metadata Row */}
+                      <div style={{
+                        background: 'linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%)',
+                        padding: '1.5rem',
+                        borderRadius: '12px',
+                        border: '1px solid #cbd5e1'
+                      }}>
+                        <InlineStack gap="800">
+                          <div>
+                            <Text as="p" variant="bodySm" fontWeight="bold">
+                              Last Updated:
+                            </Text>
+                            <Text as="p" variant="bodySm" tone="subdued">
+                              {analysisData.dataFreshness}
+                            </Text>
+                          </div>
+                          <div>
+                            <Text as="p" variant="bodySm" fontWeight="bold">
+                              Analysis Scope:
+                            </Text>
+                            <Text as="p" variant="bodySm" tone="subdued">
+                              Multi-channel competitive pricing
+                            </Text>
+                          </div>
+                          <div>
+                            <Text as="p" variant="bodySm" fontWeight="bold">
+                              Market Coverage:
+                            </Text>
+                            <Text as="p" variant="bodySm" tone="subdued">
+                              Global & regional competitors
+                            </Text>
+                          </div>
+                        </InlineStack>
+                      </div>
+                    </div>
+
+                    {/* Market Intelligence Summary */}
+                    <div>
+                    <div style={{ marginBottom: '1.5rem' }}>
+                        <Text as="h3" variant="headingLg" fontWeight="bold">
+                          Market Intelligence Summary
+                        </Text>
+                      </div>
+                      
+                      {/* Price Analysis Grid */}
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                        gap: '1.5rem',
+                        marginBottom: '2rem'
+                      }}>
+                        <div style={{
+                          background: 'linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)',
+                          border: '2px solid #22c55e',
+                          borderRadius: '16px',
+                          padding: '2rem',
+                          textAlign: 'center',
+                          position: 'relative'
+                        }}>
+                          <div style={{
+                            position: 'absolute',
+                            top: '1rem',
+                            right: '1rem',
+                            width: '40px',
+                            height: '40px',
+                            background: 'rgba(34, 197, 94, 0.1)',
+                            borderRadius: '50%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}>
+                            <div style={{
+                              width: '20px',
+                              height: '20px',
+                              background: '#22c55e',
+                              borderRadius: '50%'
+                            }} />
+                          </div>
+                          <Text as="p" variant="bodySm" tone="subdued">Your Current Price</Text>
+                          <Text as="p" variant="headingLg" fontWeight="bold">
+                            ${Number(selectedProduct?.price || 0).toFixed(2)}
+                          </Text>
+                        </div>
+
+                        <div style={{
+                          background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+                          border: '2px solid #3b82f6',
+                          borderRadius: '16px',
+                          padding: '2rem',
+                          textAlign: 'center',
+                          position: 'relative'
+                        }}>
+                          <div style={{
+                            position: 'absolute',
+                            top: '1rem',
+                            right: '1rem',
+                            width: '40px',
+                            height: '40px',
+                            background: 'rgba(59, 130, 246, 0.1)',
+                            borderRadius: '50%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}>
+                            <div style={{
+                              width: '20px',
+                              height: '20px',
+                              background: '#3b82f6',
+                              borderRadius: '50%'
+                            }} />
+                          </div>
+                          <Text as="p" variant="bodySm" tone="subdued">Market Average</Text>
+                          <Text as="p" variant="headingLg" fontWeight="bold">
+                            ${Number(analysisData?.marketInsights?.averagePrice || 0).toFixed(2)}
+                          </Text>
+                        </div>
+
+                        <div style={{
+                          background: 'linear-gradient(135deg, #fefce8 0%, #fef3c7 100%)',
+                          border: '2px solid #f59e0b',
+                          borderRadius: '16px',
+                          padding: '2rem',
+                          textAlign: 'center',
+                          position: 'relative'
+                        }}>
+                          <div style={{
+                            position: 'absolute',
+                            top: '1rem',
+                            right: '1rem',
+                            width: '40px',
+                            height: '40px',
+                            background: 'rgba(245, 158, 11, 0.1)',
+                            borderRadius: '50%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}>
+                            <div style={{
+                              width: '20px',
+                              height: '20px',
+                              background: '#f59e0b',
+                              borderRadius: '50%'
+                            }} />
+                          </div>
+                          <Text as="p" variant="bodySm" tone="subdued">Price Range</Text>
+                          <Text as="p" variant="headingLg" fontWeight="bold">
+                            ${Number(analysisData?.marketInsights?.priceRange?.min || 0).toFixed(2)} - ${Number(analysisData?.marketInsights?.priceRange?.max || 0).toFixed(2)}
+                          </Text>
+                        </div>
+                      </div>
+
+                      {/* Market Indicators */}
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+                        gap: '1.5rem'
+                      }}>
+                        <div style={{
+                          background: '#ffffff',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '12px',
+                          padding: '1.5rem',
+                          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)'
+                        }}>
+                          <Text as="p" variant="bodySm" tone="subdued" fontWeight="medium">Market Trend</Text>
+                          <div style={{ marginTop: '0.5rem' }}>
+                            <Badge tone={(analysisData?.marketInsights?.marketTrend || 'stable') === 'growing' ? 'success' : (analysisData?.marketInsights?.marketTrend || 'stable') === 'stable' ? 'info' : 'warning'}>
+                              {((analysisData?.marketInsights?.marketTrend || 'stable').charAt(0).toUpperCase() + (analysisData?.marketInsights?.marketTrend || 'stable').slice(1))}
+                            </Badge>
+                          </div>
+                        </div>
+
+                        <div style={{
+                          background: '#ffffff',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '12px',
+                          padding: '1.5rem',
+                          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)'
+                        }}>
+                          <Text as="p" variant="bodySm" tone="subdued" fontWeight="medium">Demand Level</Text>
+                          <div style={{ marginTop: '0.5rem' }}>
+                            <Badge tone={(analysisData?.marketInsights?.demandLevel || 'medium') === 'high' ? 'success' : (analysisData?.marketInsights?.demandLevel || 'medium') === 'medium' ? 'info' : 'critical'}>
+                              {((analysisData?.marketInsights?.demandLevel || 'medium').charAt(0).toUpperCase() + (analysisData?.marketInsights?.demandLevel || 'medium').slice(1))}
+                            </Badge>
+                          </div>
+                        </div>
+
+                        <div style={{
+                          background: '#ffffff',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '12px',
+                          padding: '1.5rem',
+                          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)'
+                        }}>
+                          <Text as="p" variant="bodySm" tone="subdued" fontWeight="medium">Competition Level</Text>
+                          <div style={{ marginTop: '0.5rem' }}>
+                            <Badge tone={(analysisData?.marketInsights?.competitionLevel || 'moderate') === 'low' ? 'success' : (analysisData?.marketInsights?.competitionLevel || 'moderate') === 'moderate' ? 'warning' : 'critical'}>
+                              {((analysisData?.marketInsights?.competitionLevel || 'moderate').charAt(0).toUpperCase() + (analysisData?.marketInsights?.competitionLevel || 'moderate').slice(1))}
+                            </Badge>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </BlockStack>
+                </div>
+
+                {/* Competitor Analysis */}
+                <div>
+                  <BlockStack gap="300">
+                    <InlineStack gap="200" blockAlign="center">
+                      <Text as="h3" variant="headingMd" fontWeight="bold">
+                        � Competitive Landscape Analysis
+                      </Text>
+                      <Badge tone="info">
+                        {`${(analysisData?.competitors || []).length} competitors analyzed`}
+                      </Badge>
+                    </InlineStack>
+                    
+                    <div style={{ marginTop: '1rem' }}>
+                      {(analysisData?.competitors || []).map((competitor: any, index: number) => (
+                        <div key={index} style={{
+                          background: '#ffffff',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '12px',
+                          padding: '1.25rem',
+                          marginBottom: '0.75rem',
+                          boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)'
+                        }}>
+                          <InlineStack gap="400" blockAlign="center">
+                            <div style={{ flex: 1 }}>
+                              <InlineStack gap="200" blockAlign="center">
+                                <Text as="p" variant="bodyMd" fontWeight="bold">
+                                  {competitor.name}
+                                </Text>
+                                <Badge size="small">
+                                  {competitor.type}
+                                </Badge>
+                                {competitor.inStock ? (
+                                  <Badge tone="success" size="small">In Stock</Badge>
+                                ) : (
+                                  <Badge tone="critical" size="small">Out of Stock</Badge>
+                                )}
+                              </InlineStack>
+                              <BlockStack gap="100">
+                                <InlineStack gap="300">
+                                  <Text as="p" variant="bodySm">
+                                    <strong>${competitor.price.toFixed(2)}</strong>
+                                  </Text>
+                                  <Text as="p" variant="bodySm" tone="subdued">
+                                    {competitor.rating.toFixed(1)}⭐ ({competitor.reviews.toLocaleString()} reviews)
+                                  </Text>
+                                </InlineStack>
+                                <Text as="p" variant="bodySm" tone="subdued">
+                                  Last updated: {new Date(competitor.lastUpdated).toLocaleDateString()}
+                                </Text>
+                              </BlockStack>
+                            </div>
+                            <Button
+                              url={competitor.url}
+                              external
+                              variant="secondary"
+                              size="medium"
+                            >
+                              View Product →
+                            </Button>
+                          </InlineStack>
+                        </div>
+                      ))}
+                    </div>
+                  </BlockStack>
+                </div>
+
+                {/* Market Insights */}
+                <div>
+                  <Text as="h3" variant="headingMd" fontWeight="bold">
+                    � Market Intelligence Summary
+                  </Text>
+                  <div style={{
+                    background: 'linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)',
+                    border: '1px solid #22c55e',
+                    borderRadius: '12px',
+                    padding: '1.5rem',
+                    marginTop: '1rem'
+                  }}>
+                    <BlockStack gap="300">
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+                        gap: '1rem'
+                      }}>
+                        <div>
+                          <Text as="p" variant="bodySm" tone="subdued">Your Current Price</Text>
+                          <Text as="p" variant="bodyMd" fontWeight="bold">
+                            ${analysisData.currentPrice.toFixed(2)}
+                          </Text>
+                        </div>
+                        <div>
+                          <Text as="p" variant="bodySm" tone="subdued">Market Average</Text>
+                          <Text as="p" variant="bodyMd" fontWeight="bold">
+                            ${analysisData.marketInsights.averagePrice.toFixed(2)}
+                          </Text>
+                        </div>
+                        <div>
+                          <Text as="p" variant="bodySm" tone="subdued">Price Range</Text>
+                          <Text as="p" variant="bodyMd" fontWeight="bold">
+                            ${analysisData.marketInsights.priceRange.min.toFixed(2)} - ${analysisData.marketInsights.priceRange.max.toFixed(2)}
+                          </Text>
+                        </div>
+                      </div>
+                      
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                        gap: '1rem'
+                      }}>
+                        <div>
+                          <Text as="p" variant="bodySm" tone="subdued">Market Trend</Text>
+                          <Badge tone={analysisData.marketInsights.marketTrend === 'growing' ? 'success' : analysisData.marketInsights.marketTrend === 'stable' ? 'info' : 'warning'}>
+                            {analysisData.marketInsights.marketTrend.charAt(0).toUpperCase() + analysisData.marketInsights.marketTrend.slice(1)}
+                          </Badge>
+                        </div>
+                        <div>
+                          <Text as="p" variant="bodySm" tone="subdued">Demand Level</Text>
+                          <Badge tone={analysisData.marketInsights.demandLevel === 'high' ? 'success' : analysisData.marketInsights.demandLevel === 'medium' ? 'info' : 'critical'}>
+                            {analysisData.marketInsights.demandLevel.charAt(0).toUpperCase() + analysisData.marketInsights.demandLevel.slice(1)}
+                          </Badge>
+                        </div>
+                        <div>
+                          <Text as="p" variant="bodySm" tone="subdued">Competition Level</Text>
+                          <Badge tone={analysisData.marketInsights.competitionLevel === 'low' ? 'success' : analysisData.marketInsights.competitionLevel === 'moderate' ? 'warning' : 'critical'}>
+                            {analysisData.marketInsights.competitionLevel.charAt(0).toUpperCase() + analysisData.marketInsights.competitionLevel.slice(1)}
+                          </Badge>
+                        </div>
+                      </div>
+                    </BlockStack>
+                  </div>
+                </div>
+
+                {/* Professional Strategic Recommendations */}
+                <div style={{ marginTop: '2rem' }}>
+                  <div style={{
+                    marginBottom: '1.5rem',
+                    paddingBottom: '1rem',
+                    borderBottom: '2px solid #e2e8f0'
+                  }}>
+                    <Text as="h3" variant="headingLg" fontWeight="bold">
+                      Strategic Business Recommendations
+                    </Text>
+                    <Text as="p" variant="bodyMd" tone="subdued">
+                      AI-powered insights based on competitive analysis and market trends
+                    </Text>
+                  </div>
+                  
+                  <div style={{ marginTop: '1rem' }}>
+                    <BlockStack gap="400">
+                    {analysisData.recommendations.map((rec: any, index: number) => {
+                      const getRecommendationStyle = (type: string) => {
+                        switch(type) {
+                          case 'pricing':
+                            return {
+                              background: 'linear-gradient(145deg, #ffffff 0%, #fafafa 100%)',
+                              border: '1px solid #e5e7eb',
+                              borderLeft: '6px solid #f59e0b',
+                              iconBg: '#fef3c7',
+                              iconColor: '#f59e0b',
+                              icon: '💰'
+                            };
+                          case 'marketing':
+                            return {
+                              background: 'linear-gradient(145deg, #ffffff 0%, #fafafa 100%)',
+                              border: '1px solid #e5e7eb',
+                              borderLeft: '6px solid #10b981',
+                              iconBg: '#d1fae5',
+                              iconColor: '#10b981',
+                              icon: '📈'
+                            };
+                          default:
+                            return {
+                              background: 'linear-gradient(145deg, #ffffff 0%, #fafafa 100%)',
+                              border: '1px solid #e5e7eb',
+                              borderLeft: '6px solid #8b5cf6',
+                              iconBg: '#ede9fe',
+                              iconColor: '#8b5cf6',
+                              icon: '🎯'
+                            };
+                        }
+                      };
+                      
+                      const style = getRecommendationStyle(rec.type);
+                      
+                      return (
+                        <div key={index} style={{
+                          background: style.background,
+                          border: style.border,
+                          borderLeft: style.borderLeft,
+                          borderRadius: '12px',
+                          padding: '2rem',
+                          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+                          transition: 'transform 0.2s ease, box-shadow 0.2s ease'
+                        }}>
+                          <BlockStack gap="400">
+                            <InlineStack gap="300" blockAlign="center">
+                              <div style={{
+                                width: '48px',
+                                height: '48px',
+                                background: style.iconBg,
+                                borderRadius: '12px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '20px'
+                              }}>
+                                {style.icon}
+                              </div>
+                              <div style={{ flex: 1 }}>
+                                <InlineStack align="space-between" blockAlign="center">
+                                  <Text as="h4" variant="headingSm" fontWeight="bold">
+                                    {rec.title}
+                                  </Text>
+                                  <Badge tone={rec.type === 'pricing' ? 'warning' : rec.type === 'marketing' ? 'success' : 'info'}>
+                                    {`${rec.type.charAt(0).toUpperCase() + rec.type.slice(1)} Strategy`}
+                                  </Badge>
+                                </InlineStack>
+                              </div>
+                            </InlineStack>
+                            
+                            <Text as="p" variant="bodyMd" tone="subdued">
+                              {rec.description}
+                            </Text>
+                            
+                            <div style={{
+                              background: '#f8fafc',
+                              padding: '1.25rem',
+                              borderRadius: '10px',
+                              border: '1px solid #e2e8f0'
+                            }}>
+                              <InlineStack gap="200" blockAlign="center">
+                                <div style={{
+                                  width: '24px',
+                                  height: '24px',
+                                  background: style.iconColor,
+                                  borderRadius: '50%',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  color: 'white',
+                                  fontSize: '12px',
+                                  fontWeight: 'bold'
+                                }}>
+                                  ✓
+                                </div>
+                                <Text as="p" variant="bodyMd" fontWeight="medium">
+                                  Expected Impact: {rec.impact}
+                                </Text>
+                              </InlineStack>
+                            </div>
+                          </BlockStack>
+                        </div>
+                      );
+                    })}
+                  </BlockStack>
+                  </div>
+                </div>
+
+                {/* Risk Assessment & Market Opportunity */}
+                <div style={{ 
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: '1.5rem',
+                  marginTop: '2rem'
+                }}>
+                  {/* Risk Assessment */}
+                  <div style={{
+                    background: 'linear-gradient(145deg, #ffffff 0%, #fafafa 100%)',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '16px',
+                    padding: '1.5rem',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)'
+                  }}>
+                    <BlockStack gap="300">
+                      <InlineStack gap="200" blockAlign="center">
+                        <div style={{
+                          width: '40px',
+                          height: '40px',
+                          background: analysisData.riskAssessment?.level === 'high' ? '#fee2e2' : 
+                                     analysisData.riskAssessment?.level === 'medium' ? '#fef3c7' : '#d1fae5',
+                          borderRadius: '10px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '18px'
+                        }}>
+                          {analysisData.riskAssessment?.level === 'high' ? '⚠️' : 
+                           analysisData.riskAssessment?.level === 'medium' ? '⚡' : '✅'}
+                        </div>
+                        <div>
+                          <Text as="h4" variant="headingSm" fontWeight="bold">
+                            Risk Assessment
+                          </Text>
+                          <Badge tone={analysisData.riskAssessment?.level === 'high' ? 'critical' : 
+                                      analysisData.riskAssessment?.level === 'medium' ? 'warning' : 'success'}>
+                            {`${(analysisData.riskAssessment?.level || 'low').charAt(0).toUpperCase() + (analysisData.riskAssessment?.level || 'low').slice(1)} Risk`}
+                          </Badge>
+                        </div>
+                      </InlineStack>
+                      
+                      <BlockStack gap="200">
+                        <Text as="p" variant="bodySm" fontWeight="medium">
+                          Key Risk Factors:
+                        </Text>
+                        {(analysisData.riskAssessment?.factors || []).map((factor: string, index: number) => (
+                          <Text key={index} as="p" variant="bodySm" tone="subdued">
+                            • {factor}
+                          </Text>
+                        ))}
+                      </BlockStack>
+                    </BlockStack>
+                  </div>
+
+                  {/* Market Opportunity */}
+                  <div style={{
+                    background: 'linear-gradient(145deg, #ffffff 0%, #fafafa 100%)',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '16px',
+                    padding: '1.5rem',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)'
+                  }}>
+                    <BlockStack gap="300">
+                      <InlineStack gap="200" blockAlign="center">
+                        <div style={{
+                          width: '40px',
+                          height: '40px',
+                          background: '#dbeafe',
+                          borderRadius: '10px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '18px'
+                        }}>
+                          🎯
+                        </div>
+                        <div>
+                          <Text as="h4" variant="headingSm" fontWeight="bold">
+                            Market Opportunity
+                          </Text>
+                          <Text as="p" variant="bodySm" tone="subdued">
+                            Score: {analysisData.marketOpportunity?.score || 75}/100
+                          </Text>
+                        </div>
+                      </InlineStack>
+                      
+                      <BlockStack gap="200">
+                        <div style={{
+                          background: '#f0f9ff',
+                          padding: '0.75rem',
+                          borderRadius: '8px',
+                          border: '1px solid #bfdbfe'
+                        }}>
+                          <Text as="p" variant="bodySm" fontWeight="medium">
+                            {analysisData.marketOpportunity?.potential || 'Market positioning opportunity'}
+                          </Text>
+                        </div>
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          <strong>Implementation Timeline:</strong> {analysisData.marketOpportunity?.timeline || '30-60 days'}
+                        </Text>
+                      </BlockStack>
+                    </BlockStack>
+                  </div>
+                </div>
+
+                {/* Competitive Advantage Analysis */}
+                <div style={{
+                  background: 'linear-gradient(145deg, #ffffff 0%, #fafafa 100%)',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '16px',
+                  padding: '2rem',
+                  marginTop: '1.5rem',
+                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)'
+                }}>
+                  <BlockStack gap="400">
+                    <div>
+                      <Text as="h4" variant="headingMd" fontWeight="bold">
+                        Competitive Advantage Analysis
+                      </Text>
+                      <Text as="p" variant="bodyMd" tone="subdued">
+                        Strategic positioning assessment based on market analysis
+                      </Text>
+                    </div>
+                    
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 1fr',
+                      gap: '2rem'
+                    }}>
+                      {/* Strengths */}
+                      <div>
+                        <InlineStack gap="200" blockAlign="center">
+                          <div style={{
+                            width: '32px',
+                            height: '32px',
+                            background: '#d1fae5',
+                            borderRadius: '8px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '16px'
+                          }}>
+                            💪
+                          </div>
+                          <Text as="h5" variant="headingSm" fontWeight="bold">
+                            Competitive Strengths
+                          </Text>
+                        </InlineStack>
+                        <div style={{ marginTop: '1rem' }}>
+                          <BlockStack gap="200">
+                            {(analysisData.competitiveAdvantage?.strengths || []).map((strength: string, index: number) => (
+                              <div key={index} style={{
+                                background: '#f0fdf4',
+                                padding: '0.75rem',
+                                borderRadius: '8px',
+                                border: '1px solid #bbf7d0'
+                              }}>
+                                <Text as="p" variant="bodySm">
+                                  ✓ {strength}
+                                </Text>
+                              </div>
+                            ))}
+                          </BlockStack>
+                        </div>
+                      </div>
+
+                      {/* Areas for Improvement */}
+                      <div>
+                        <InlineStack gap="200" blockAlign="center">
+                          <div style={{
+                            width: '32px',
+                            height: '32px',
+                            background: '#fef3c7',
+                            borderRadius: '8px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '16px'
+                          }}>
+                            🎯
+                          </div>
+                          <Text as="h5" variant="headingSm" fontWeight="bold">
+                            Areas for Improvement
+                          </Text>
+                        </InlineStack>
+                        <div style={{ marginTop: '1rem' }}>
+                          <BlockStack gap="200">
+                            {(analysisData.competitiveAdvantage?.weaknesses || []).map((weakness: string, index: number) => (
+                              <div key={index} style={{
+                                background: '#fffbeb',
+                                padding: '0.75rem',
+                                borderRadius: '8px',
+                                border: '1px solid #fde68a'
+                              }}>
+                                <Text as="p" variant="bodySm">
+                                  → {weakness}
+                                </Text>
+                              </div>
+                            ))}
+                          </BlockStack>
+                        </div>
+                      </div>
+                    </div>
+                  </BlockStack>
+                </div>
+
+                {/* Data Sources & Transparency */}
+                <div style={{
+                  background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
+                  border: '2px solid #cbd5e1',
+                  borderRadius: '12px',
+                  padding: '1.5rem'
+                }}>
+                  <BlockStack gap="300">
+                    <Text as="h4" variant="headingSm" fontWeight="bold">
+                      🔍 Data Sources & Methodology
+                    </Text>
+                    
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                      gap: '1rem'
+                    }}>
+                      {analysisData.marketInsights.dataSources.map((source: string, index: number) => (
+                        <div key={index} style={{
+                          background: 'white',
+                          padding: '0.75rem',
+                          borderRadius: '8px',
+                          border: '1px solid #e5e7eb'
+                        }}>
+                          <Text as="p" variant="bodySm" fontWeight="medium">
+                            {source}
+                          </Text>
+                        </div>
+                      ))}
+                    </div>
+                    
+                    <InlineStack gap="400">
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        📅 Last Updated: {new Date(analysisData.lastUpdated).toLocaleString()}
+                      </Text>
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        � Confidence: {analysisData.marketInsights.confidence}%
+                      </Text>
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        🎯 Sample Size: {analysisData.marketInsights.sampleSize.toLocaleString()} data points
+                      </Text>
+                    </InlineStack>
+                    
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      This analysis combines real-time pricing data, market trend indicators, and competitive intelligence to provide actionable business insights. Data is aggregated from multiple verified sources and updated every 2 hours.
+                    </Text>
+                    
+                    <div style={{
+                      background: '#f0f9ff',
+                      border: '1px solid #0ea5e9',
+                      borderRadius: '8px',
+                      padding: '1rem',
+                      marginTop: '1rem'
+                    }}>
+                      <Text as="p" variant="bodySm" fontWeight="medium">
+                        📊 Confidence Score Explanation:
+                      </Text>
+                      <div style={{ marginTop: '0.5rem' }}>
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          The {analysisData.marketInsights.confidence}% confidence level reflects the reliability of our market analysis based on:
+                        </Text>
+                      </div>
+                      <ul style={{ margin: '0.5rem 0', paddingLeft: '1rem', fontSize: '13px', color: '#64748b' }}>
+                        <li><strong>Data Quality:</strong> How recent and accurate the pricing data is across all sources</li>
+                        <li><strong>Market Coverage:</strong> Number of competitors and marketplaces analyzed in your product category</li>
+                        <li><strong>Source Reliability:</strong> Verification from multiple independent data providers</li>
+                        <li><strong>Sample Size:</strong> Volume of data points ({analysisData.marketInsights.sampleSize.toLocaleString()}+ transactions analyzed)</li>
+                      </ul>
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        Higher confidence scores (85%+) indicate more reliable market insights for strategic decision-making.
+                      </Text>
+                    </div>
+                  </BlockStack>
+                </div>
+              </BlockStack>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '2rem' }}>
+                <Text as="p" variant="bodyMd" tone="critical">
+                  {analysisData?.error || 'Unable to fetch analysis data. Please try again later.'}
+                </Text>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  Please check your internet connection and try again
+                </Text>
+              </div>
+            )}
           </Modal.Section>
         </Modal>
       )}
@@ -2772,7 +4261,7 @@ export default function Index() {
               <div className="help-accordion-content">
                 <div className="help-accordion-scroll">
                   <Text as="p" variant="bodyMd">
-                    Need assistance with the Low Stock Alert App? Our support team is here to help you with any questions or issues.
+                    Need assistance with Spector? Our support team is here to help you with any questions or issues.
                   </Text>
                   
                   <div style={{ marginTop: '1rem' }}>
@@ -2780,7 +4269,7 @@ export default function Index() {
                       Email Support:
                     </Text>
                     <a 
-                      href="mailto:ceren@cerensatelier.art?subject=Low Stock Alert App Support"
+                      href="mailto:ceren@cerensatelier.art?subject=Spector App Support"
                       className="help-email-link"
                     >
                       ceren@cerensatelier.art
@@ -2820,7 +4309,7 @@ export default function Index() {
               <div className="help-accordion-content">
                 <div className="help-accordion-scroll">
                   <Text as="p" variant="bodyMd">
-                    Complete guide to using the Low Stock Alert App effectively for your Shopify store.
+                    Complete guide to using Spector effectively for your Shopify store.
                   </Text>
                   
                   <div style={{ marginTop: '1rem' }}>
@@ -2870,7 +4359,7 @@ export default function Index() {
               <div className="help-accordion-content">
                 <div className="help-accordion-scroll">
                   <Text as="p" variant="bodyMd">
-                    Legal terms and conditions for using the Low Stock Alert App.
+                    Legal terms and conditions for using Spector.
                   </Text>
                   
                   <div style={{ marginTop: '1rem' }}>
@@ -2916,7 +4405,7 @@ export default function Index() {
               <div className="help-accordion-content">
                 <div className="help-accordion-scroll">
                   <Text as="p" variant="bodyMd" fontWeight="semibold">
-                    By downloading and using the Low Stock Alert App, you agree to this Privacy Policy.
+                    By downloading and using Spector, you agree to this Privacy Policy.
                   </Text>
                   
                   <div style={{ marginTop: '1rem' }}>
@@ -2943,7 +4432,7 @@ export default function Index() {
                       We use your information solely to provide and improve our inventory management services:
                     </Text>
                     <ul className="help-list">
-                      <li>Monitor inventory levels and generate low stock alerts</li>
+                      <li>Monitor inventory levels and generate stock alerts</li>
                       <li>Analyze sales patterns to predict future inventory needs</li>
                       <li>Send email notifications about low inventory and potential stockouts</li>
                       <li>Provide inventory analytics and reporting features</li>
@@ -3110,7 +4599,7 @@ export default function Index() {
             </Text>
             
             <Text as="p" variant="bodyMd">
-              This low stock alert system is designed to help you manage inventory proactively. 
+              This stock alert system is designed to help you manage inventory proactively. 
               However, please be aware of the following important limitations:
             </Text>
             

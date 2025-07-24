@@ -1,8 +1,15 @@
-# Shopify App Template - Remix
+# Spector - Shopify Inventory Management App
 
-This is a template for building a [Shopify app](https://shopify.dev/docs/apps/getting-started) using the [Remix](https://remix.run) framework.
+Spector is a comprehensive inventory management application built for Shopify stores using the [Remix](https://remix.run) framework.
 
-Rather than cloning this repo, you can use your preferred package manager and the Shopify CLI with [these steps](https://shopify.dev/docs/apps/getting-started/create).
+## Features
+
+- **Real-time Inventory Monitoring**: Track stock levels across all products
+- **Intelligent Forecasting**: Predict when products will run out of stock based on sales velocity
+- **Multi-channel Alerts**: Email notifications for low stock and out-of-stock products
+- **Storefront Visibility Management**: Automatically hide/show products based on inventory levels
+- **Product Selection Tools**: Granular control over which products to manage
+- **Advanced Analytics**: Sales velocity tracking and inventory insights
 
 Visit the [`shopify.dev` documentation](https://shopify.dev/docs/api/shopify-app-remix) for more details on the Remix app package.
 

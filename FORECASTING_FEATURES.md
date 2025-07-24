@@ -1,7 +1,7 @@
 # 🔮 AI-Powered Stock Forecasting Features
 
 ## Overview
-Enhanced the low stock alert app with intelligent forecasting capabilities that predict when products will run out of stock based on sales velocity analysis.
+Enhanced Spector with intelligent forecasting capabilities that predict when products will run out of stock based on sales velocity analysis.
 
 ## 🆕 New Features
 

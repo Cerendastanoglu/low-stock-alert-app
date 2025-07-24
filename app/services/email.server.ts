@@ -11,7 +11,19 @@ interface ShopInfo {
   contactEmail?: string;
 }
 
-interface SimpleEmailSettings {
+  try {
+    const emailData = {
+      to: settings.recipientEmail,
+      from: `"${settings.shopInfo.name} - Spector" <noreply@${settings.shopInfo.myshopifyDomain}>`,
+      subject: `✅ Test Email - ${settings.shopInfo.name} Spector System`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #059669;">✅ Email Configuration Test Successful</h2>
+          <p style="color: #374151;">This is a test email to confirm your email notification settings are working correctly for <strong>${settings.shopInfo.name}</strong>.</p>
+          
+          <div style="margin: 20px 0; padding: 15px; background-color: #f0fdf4; border-left: 4px solid #059669; border-radius: 4px;">
+                        <p style="margin: 0; color: #059669; font-weight: bold;">
+              <strong>Great news!</strong> If you received this email, your Spector system is properly configured to send notifications.pleEmailSettings {
   enabled: boolean;
   recipientEmail: string;
   shopInfo: ShopInfo;
@@ -56,7 +68,7 @@ export const sendLowStockAlert = async (
     
     let htmlContent = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #d63638;">🚨 Low Stock Alert - ${totalAlerts} Products Need Attention</h2>
+        <h2 style="color: #d63638;">🚨 Stock Alert - ${totalAlerts} Products Need Attention</h2>
         <p style="color: #374151;">Your <strong>${settings.shopInfo.name}</strong> store has products that require immediate attention.</p>
     `;
 
@@ -111,7 +123,7 @@ export const sendLowStockAlert = async (
         
         <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
         <p style="color: #9ca3af; font-size: 12px; text-align: center;">
-          This alert was generated automatically by your Low Stock Alert Dashboard for <strong>${settings.shopInfo.name}</strong><br>
+          This alert was generated automatically by your Spector Dashboard for <strong>${settings.shopInfo.name}</strong><br>
           Generated on: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}
         </p>
       </div>
@@ -119,11 +131,11 @@ export const sendLowStockAlert = async (
 
     const emailData = {
       to: settings.recipientEmail,
-      from: `"${settings.shopInfo.name} - Low Stock Alert" <noreply@${settings.shopInfo.myshopifyDomain}>`,
+      from: `"${settings.shopInfo.name} - Spector" <noreply@${settings.shopInfo.myshopifyDomain}>`,
       subject: `🚨 ${settings.shopInfo.name}: ${totalAlerts} Products Need Attention`,
       html: htmlContent,
       text: `
-Low Stock Alert - ${totalAlerts} Products Need Attention
+Stock Alert - ${totalAlerts} Products Need Attention
 Store: ${settings.shopInfo.name}
 
 ${zeroStockProducts.length > 0 ? `
@@ -180,8 +192,8 @@ export const testEmailSettings = async (settings: SimpleEmailSettings) => {
   try {
     const emailData = {
       to: settings.recipientEmail,
-      from: `"${settings.shopInfo.name} - Low Stock Alert" <noreply@${settings.shopInfo.myshopifyDomain}>`,
-      subject: `✅ Test Email - ${settings.shopInfo.name} Low Stock Alert System`,
+      from: `"${settings.shopInfo.name} - Spector" <noreply@${settings.shopInfo.myshopifyDomain}>`,
+      subject: `✅ Test Email - ${settings.shopInfo.name} Spector System`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
           <h2 style="color: #059669;">✅ Email Configuration Test Successful</h2>
@@ -189,7 +201,7 @@ export const testEmailSettings = async (settings: SimpleEmailSettings) => {
           
           <div style="margin: 20px 0; padding: 15px; background-color: #f0fdf4; border-left: 4px solid #059669; border-radius: 4px;">
             <p style="color: #065f46; margin: 0;">
-              <strong>Great news!</strong> If you received this email, your Low Stock Alert system is properly configured to send notifications.
+              <strong>Great news!</strong> If you received this email, your Spector system is properly configured to send notifications.
             </p>
           </div>
           
@@ -214,7 +226,7 @@ Email Configuration Test Successful
 
 This is a test email to confirm your email notification settings are working correctly for ${settings.shopInfo.name}.
 
-If you received this email, your Low Stock Alert system is properly configured to send notifications.
+If you received this email, your Spector system is properly configured to send notifications.
 
 Email Settings Summary:
 - Store: ${settings.shopInfo.name}
